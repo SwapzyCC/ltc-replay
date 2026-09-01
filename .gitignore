@@ -1,0 +1,22 @@
+node_modules/
+dist/
+
+# Runtime secrets. Only .env.example is tracked.
+.env
+.env.*
+!.env.example
+
+# The journal and its WAL sidecars. Regenerable from the node by catch-up,
+# and large enough that it has no business in git.
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+data/
+
+*.log
+npm-debug.log*
+
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
