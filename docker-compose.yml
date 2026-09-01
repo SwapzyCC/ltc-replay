@@ -1,0 +1,96 @@
+# ltc-replay alongside a Litecoin Core node.
+#
+# The relay has to reach two things on the node: JSON-RPC, and the ZMQ
+# publishers. How it gets there depends on where litecoind runs, and there are
+# two shapes. Pick one and delete the other.
+#
+#   A. litecoind runs in Docker (the default below)
+#      Join its network and address it by container name. Core's RPC and ZMQ
+#      ports then need no host publishing at all, which is the safer
+#      arrangement: nothing on the node's RPC port is reachable from outside
+#      the Docker network.
+#
+#   B. litecoind runs on the host
+#      Comment out the `networks:` block and uncomment `network_mode: host`.
+#      The relay then reaches 127.0.0.1 directly, and Core's ZMQ can stay bound
+#      to loopback where it belongs. Note that `network_mode: host` ignores
+#      `ports:` — the service listens on whatever HTTP_BIND/HTTP_PORT say.
+#
+# Everything secret comes from .env, which is not in the image and not in this
+# file. Copy .env.example and fill it in before the first `docker compose up`.
+
+services:
+  ltc-replay:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ltc-replay:latest
+    container_name: ltc-replay
+    restart: unless-stopped
+
+    env_file:
+      - .env
+
+    environment:
+      # Inside the container, bind to all interfaces; `ports:` below is what
+      # decides actual reachability. Overrides anything in .env, on purpose —
+      # a .env written for a bare-metal install says 127.0.0.1, which inside a
+      # container means "unreachable from anywhere".
+      HTTP_BIND: 0.0.0.0
+      DB_PATH: /app/data/journal.sqlite
+      LOG_FORMAT: json
+      # Shape A: address the node by its container name. Change `litecoind` to
+      # whatever the node's service is actually called.
+      LTC_RPC_URL: http://litecoind:9332
+      LTC_ZMQ_TX_URL: tcp://litecoind:28334
+      LTC_ZMQ_BLOCK_URL: tcp://litecoind:28333
+      PUB_BIND: tcp://0.0.0.0:28340
+
+    ports:
+      # Replay API. The bearer token is the only thing in front of it, so the
+      # host-side bind is loopback: put Cloudflare, a tunnel, or a firewall
+      # rule in front before exposing it. Change to "28350:28350" only
+      # deliberately.
+      - "127.0.0.1:28350:28350"
+      # ZMQ re-publish. PUB has no authentication whatsoever — anyone who can
+      # reach this port gets the full live feed. Loopback, or a private
+      # network, and nothing else.
+      - "127.0.0.1:28340:28340"
+
+    volumes:
+      # The journal. This is the one piece of state worth keeping: losing it
+      # means re-walking the chain and, until that finishes, answering "no" to
+      # questions about deposits that did happen.
+      - ./data:/app/data
+
+    networks:
+      - litecoin
+
+    # Shape B — litecoind on the host. Uncomment, and comment out `networks:`
+    # and `ports:` above.
+    # network_mode: host
+
+    stop_grace_period: 30s
+
+    # The relay is a single Node process with an embedded database. It does not
+    # need much, but it should not be able to take the node down with it if a
+    # replay stream goes wrong.
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+networks:
+  # `external: true` because litecoind's compose project owns this network —
+  # this file joins it rather than creating a second one. If the node runs
+  # under a different project, `docker network ls` will show the real name;
+  # put that in `name:` below.
+  litecoin:
+    external: true
+    name: litecoin

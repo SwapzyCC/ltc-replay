@@ -1,0 +1,26 @@
+# Never bake secrets or local state into an image.
+.env
+.env.*
+!.env.example
+data/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+
+# Rebuilt inside the builder stage; copying them in would ship the host's
+# native binaries, which are compiled for the host's libc, not the image's.
+node_modules/
+dist/
+
+.git/
+.gitignore
+.github/
+docs/
+deploy/
+client/
+test/
+README.md
+*.md
+Dockerfile
+docker-compose.yml
+.dockerignore
