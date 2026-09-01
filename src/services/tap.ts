@@ -12,10 +12,10 @@
  */
 
 import { Subscriber, Publisher } from "zeromq";
-import type { Config } from "./config.js";
-import type { Journal } from "./journal.js";
-import { logger, errMsg } from "./log.js";
-import { computeTxid } from "./txid.js";
+import type { Config } from "../config/index.js";
+import type { Journal, AddressPayment } from "../journal/index.js";
+import { logger, errMsg } from "../core/log.js";
+import { extractPayments } from "../chain/payments.js";
 
 const log = logger("tap");
 
@@ -24,6 +24,7 @@ const RECONNECT_DELAY_MS = 2_000;
 export interface TapStats {
   txSeen: number;
   txJournalled: number;
+  paymentsIndexed: number;
   blocksSeen: number;
   coreGaps: number;
   lastTxAt: number | null;
@@ -41,6 +42,7 @@ export class Tap {
   private readonly stats: TapStats = {
     txSeen: 0,
     txJournalled: 0,
+    paymentsIndexed: 0,
     blocksSeen: 0,
     coreGaps: 0,
     lastTxAt: null,
@@ -126,7 +128,7 @@ export class Tap {
     const seq = raw.readUInt32LE(0);
 
     const prev = this.coreSeq.get(topic);
-    if (prev !== undefined && seq !== ((prev + 1) >>> 0)) {
+    if (prev !== undefined && seq !== (prev + 1) >>> 0) {
       const missed = (seq - prev - 1) >>> 0;
       this.stats.coreGaps += 1;
       log.warn(
@@ -160,8 +162,9 @@ export class Tap {
     this.stats.lastTxAt = Date.now();
 
     let txid: string;
+    let payments: AddressPayment[];
     try {
-      txid = computeTxid(payload);
+      ({ txid, payments } = extractPayments(payload));
     } catch (err: unknown) {
       log.warn(`undecodable rawtx frame (${payload.length} bytes)`, errMsg(err));
       return;
@@ -169,6 +172,13 @@ export class Tap {
 
     try {
       if (this.journal.appendTx(txid, payload) !== null) this.stats.txJournalled += 1;
+
+      // Indexing addresses here is what makes an unconfirmed deposit visible
+      // the moment the network sees it, rather than only once catch-up reaches
+      // the block that includes it.
+      if (this.cfg.addressIndex && payments.length > 0) {
+        this.stats.paymentsIndexed += this.journal.indexAddressPayments(txid, payments);
+      }
     } catch (err: unknown) {
       log.error(`journal write failed for ${txid}`, errMsg(err));
     }

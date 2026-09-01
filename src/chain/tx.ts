@@ -58,6 +58,20 @@ function varint(c: Cursor): number {
   return Number(v);
 }
 
+export interface TxOutput {
+  /** Index within the transaction — the `vout` half of an outpoint. */
+  n: number;
+  /** Value in litoshis. Read as BigInt because 8 bytes can exceed 2^53. */
+  value: bigint;
+  /** The output script, from which an address is derived. */
+  script: Buffer;
+}
+
+export interface DecodedTx {
+  txid: string;
+  outputs: TxOutput[];
+}
+
 /**
  * Computes the txid of a raw transaction.
  *
@@ -65,6 +79,20 @@ function varint(c: Cursor): number {
  * @throws  RangeError if the buffer is not a well-formed transaction.
  */
 export function computeTxid(raw: Buffer): string {
+  return decodeTx(raw).txid;
+}
+
+/**
+ * Decodes a raw transaction far enough to identify it and see who it paid.
+ *
+ * Only outputs are returned. Inputs identify their source by outpoint, not by
+ * address, and resolving one to an address means fetching the transaction it
+ * spends — which a pruned node cannot serve. So the index built from this
+ * covers funds *received*, which is the question a deposit monitor asks.
+ *
+ * @throws RangeError if the buffer is not a well-formed transaction.
+ */
+export function decodeTx(raw: Buffer): DecodedTx {
   const c: Cursor = { buf: raw, pos: 0 };
 
   const versionStart = c.pos;
@@ -87,9 +115,16 @@ export function computeTxid(raw: Buffer): string {
   }
 
   const voutCount = varint(c);
+  const outputs: TxOutput[] = [];
   for (let i = 0; i < voutCount; i++) {
-    skip(c, 8); // value
-    skip(c, varint(c)); // scriptPubKey
+    if (c.pos + 8 > raw.length) throw new RangeError("truncated transaction");
+    const value = raw.readBigUInt64LE(c.pos);
+    skip(c, 8);
+
+    const scriptLen = varint(c);
+    const scriptStart = c.pos;
+    skip(c, scriptLen);
+    outputs.push({ n: i, value, script: raw.subarray(scriptStart, c.pos) });
   }
 
   const bodyEnd = c.pos;
@@ -114,5 +149,6 @@ export function computeTxid(raw: Buffer): string {
       ])
     : raw;
 
-  return Buffer.from(hash256(stripped)).reverse().toString("hex");
+  const txid = Buffer.from(hash256(stripped)).reverse().toString("hex");
+  return { txid, outputs };
 }
