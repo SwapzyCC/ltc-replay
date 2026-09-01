@@ -17,7 +17,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { computeTxid } from "../src/txid.js";
+import { computeTxid } from "../src/chain/tx.js";
 
 const LEGACY_HEX =
   "0100000001c997a5e56e104102fa209c6a852dd90660a20b2d9c352423edce25857fcd37" +

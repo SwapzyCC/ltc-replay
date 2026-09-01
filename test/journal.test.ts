@@ -10,7 +10,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Journal } from "../src/journal.js";
+import { Journal, type JournalEvent } from "../src/journal/index.js";
 
 const dirs: string[] = [];
 
@@ -70,7 +70,11 @@ test("eventsSince pages without gaps or repeats", () => {
   }
 
   assert.equal(seen.length, 25);
-  assert.deepEqual(seen, [...seen].sort((x, y) => x - y), "pages must stay ordered");
+  assert.deepEqual(
+    seen,
+    seen.toSorted((x, y) => x - y),
+    "pages must stay ordered",
+  );
   assert.equal(new Set(seen).size, 25, "no event may appear twice");
   j.close();
 });
@@ -100,7 +104,7 @@ test("a reorg drops the orphaned branch so catch-up re-walks it", () => {
   assert.equal(j.lastBlock()?.height, 10, "catch-up resumes from the fork point");
 
   // The reorg record itself survives — it is the consumer's only notice.
-  const reorgs = j.eventsSince(0, 100).filter((e) => e.type === "reorg");
+  const reorgs = j.eventsSince(0, 100).filter((e: JournalEvent) => e.type === "reorg");
   assert.equal(reorgs.length, 1);
   j.close();
 });
