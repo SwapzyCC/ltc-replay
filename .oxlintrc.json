@@ -1,0 +1,59 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript", "unicorn", "promise", "node"],
+  "env": { "node": true, "es2023": true },
+  "categories": {
+    "correctness": "error",
+    "suspicious": "error",
+    "perf": "warn"
+  },
+  "rules": {
+    "eqeqeq": ["error", "always", { "null": "ignore" }],
+    "no-console": "error",
+    "no-var": "error",
+    "prefer-const": "error",
+    "no-eval": "error",
+    "no-implied-eval": "error",
+    "no-new-func": "error",
+    "typescript/no-explicit-any": "error",
+    "typescript/consistent-type-imports": "off",
+    "promise/no-return-wrap": "error",
+    "unicorn/prefer-node-protocol": "error",
+
+    // Off, deliberately. Every await-in-loop in this service is sequential on
+    // purpose: catch-up walks blocks in height order, the replay stream writes
+    // with backpressure, and the tap drains one ZMQ frame at a time. Running
+    // any of them concurrently would either reorder the journal or stampede
+    // the node with parallel getblock calls.
+    "no-await-in-loop": "off",
+
+    // Off, deliberately. Both call sites reverse a Buffer this code just
+    // allocated, to turn a hash into display byte order. Uint8Array#toReversed
+    // returns a plain Uint8Array, whose toString() ignores the "hex" argument
+    // and yields comma-separated decimals — the rule's suggested fix is
+    // silently wrong here.
+    "unicorn/no-array-reverse": "off"
+  },
+  "overrides": [
+    {
+      "files": ["src/core/log.ts"],
+      "rules": {
+        "no-console": "off"
+      }
+    },
+    {
+      "files": ["scripts/**", "client/**"],
+      "rules": {
+        "no-console": "off"
+      }
+    },
+    {
+      "files": ["test/**"],
+      "rules": {
+        "typescript/no-explicit-any": "off",
+        "no-console": "off"
+      }
+    }
+  ],
+  "ignorePatterns": ["dist/**", "node_modules/**", "data/**"]
+}
