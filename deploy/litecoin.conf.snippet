@@ -1,0 +1,35 @@
+# Append to litecoin.conf, then restart litecoind.
+#
+# The relay runs on this same machine, so every endpoint stays on loopback.
+# Nothing here needs to be reachable from outside the box.
+
+# ── Required: the transaction index ──────────────────────────────────────────
+# Replay resolves transactions that belong to no loaded wallet. Without
+# txindex, getrawtransaction answers "No such mempool transaction" for any
+# confirmed transaction the wallet does not own, and the relay refuses to
+# start rather than serve an incomplete history.
+#
+# Setting this on an existing node requires a one-time reindex:
+#   litecoind -reindex
+# Budget a few hours and roughly 40 GB of extra disk.
+txindex=1
+
+# ── ZMQ publishers ───────────────────────────────────────────────────────────
+zmqpubrawtx=tcp://127.0.0.1:28332
+zmqpubhashblock=tcp://127.0.0.1:28333
+
+# High-water marks. When the queue for a topic fills, Core drops frames
+# silently — the relay detects this from the per-topic sequence counter and
+# logs it, but not losing them in the first place is better. The defaults
+# (1000) are low for a busy mempool.
+zmqpubrawtxhwm=50000
+zmqpubhashblockhwm=10000
+
+# ── RPC ──────────────────────────────────────────────────────────────────────
+# Used for catch-up and for serving block contents. Loopback only.
+server=1
+rpcbind=127.0.0.1
+rpcallowip=127.0.0.1
+# Prefer rpcauth over a plaintext rpcpassword. Generate with the
+# rpcauth.py helper shipped with Core:
+#   rpcauth=ltcreplay:<salt>$<hash>

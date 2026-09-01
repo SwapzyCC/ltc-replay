@@ -1,0 +1,46 @@
+[Unit]
+Description=ltc-replay — durable ZMQ tap and replay for Litecoin Core
+Documentation=https://github.com/
+# The node must be up first: preflight refuses to start against a syncing node,
+# and Restart=always turns that into a retry loop until it is ready.
+After=network-online.target litecoind.service
+Wants=network-online.target litecoind.service
+
+[Service]
+Type=simple
+User=ltcreplay
+Group=ltcreplay
+WorkingDirectory=/opt/ltc-replay
+EnvironmentFile=/opt/ltc-replay/.env
+ExecStart=/usr/bin/node /opt/ltc-replay/dist/index.js
+
+Restart=always
+RestartSec=5
+# Do not give up: every restart runs catch-up, so a long outage still ends
+# with a complete journal.
+StartLimitIntervalSec=0
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ltc-replay
+
+# ── Hardening ────────────────────────────────────────────────────────────────
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=false
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+# The journal directory is the only path the service may write.
+ReadWritePaths=/opt/ltc-replay/data
+
+[Install]
+WantedBy=multi-user.target
