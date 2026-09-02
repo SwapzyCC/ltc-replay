@@ -18,6 +18,15 @@
 #
 # Everything secret comes from .env, which is not in the image and not in this
 # file. Copy .env.example and fill it in before the first `docker compose up`.
+#
+# The three endpoint URLs below default to Shape A's container names and are
+# overridden by whatever .env sets, so a node reached over TLS from another
+# host needs no edit to this file — only to .env.
+#
+# Two variables exist only for this file, because a URI cannot be split by
+# compose: PUB_PORT (the port inside PUB_BIND) and PUB_BIND_HOST (the host
+# interface the PUB port is published on). Both default to the loopback
+# arrangement in .env.example.
 
 services:
   ltc-replay:
@@ -32,30 +41,43 @@ services:
       - .env
 
     environment:
-      # Inside the container, bind to all interfaces; `ports:` below is what
-      # decides actual reachability. Overrides anything in .env, on purpose —
-      # a .env written for a bare-metal install says 127.0.0.1, which inside a
-      # container means "unreachable from anywhere".
+      # Both listeners bind all interfaces INSIDE the container. This is not a
+      # preference and .env does not get a vote: a process bound to 127.0.0.1
+      # inside a container is reachable from nothing, published port or not.
+      # Reachability is decided by `ports:` below, where HTTP_BIND is applied
+      # to the host side — which is where it means what you think it means.
       HTTP_BIND: 0.0.0.0
-      DB_PATH: /app/data/journal.sqlite
-      LOG_FORMAT: json
-      # Shape A: address the node by its container name. Change `litecoind` to
-      # whatever the node's service is actually called.
-      LTC_RPC_URL: http://litecoind:9332
-      LTC_ZMQ_TX_URL: tcp://litecoind:28334
-      LTC_ZMQ_BLOCK_URL: tcp://litecoind:28333
-      PUB_BIND: tcp://0.0.0.0:28340
+      PUB_BIND: tcp://0.0.0.0:${PUB_PORT:-28340}
+
+      # Ports and paths follow .env.
+      HTTP_PORT: ${HTTP_PORT:-28350}
+      DB_PATH: ${DB_PATH:-/app/data/journal.sqlite}
+      LOG_FORMAT: ${LOG_FORMAT:-json}
+
+      # The endpoints come from .env when it sets them, and fall back to
+      # Shape A's container names when it does not. The `${VAR:-default}` form
+      # matters: a bare `LTC_RPC_URL: http://litecoind:9332` here would beat
+      # env_file and silently discard whatever .env says — including a tls://
+      # or https:// endpoint for a node that is not on this Docker network.
+      #
+      # Change `litecoind` to whatever the node's service is actually called.
+      LTC_RPC_URL: ${LTC_RPC_URL:-http://litecoind:9332}
+      LTC_ZMQ_TX_URL: ${LTC_ZMQ_TX_URL:-tcp://litecoind:28334}
+      LTC_ZMQ_BLOCK_URL: ${LTC_ZMQ_BLOCK_URL:-tcp://litecoind:28333}
 
     ports:
-      # Replay API. The bearer token is the only thing in front of it, so the
-      # host-side bind is loopback: put Cloudflare, a tunnel, or a firewall
-      # rule in front before exposing it. Change to "28350:28350" only
-      # deliberately.
-      - "127.0.0.1:28350:28350"
-      # ZMQ re-publish. PUB has no authentication whatsoever — anyone who can
+      # Host interface and ports both come from .env. HTTP_BIND is the host-side
+      # address here, so the loopback default in .env.example keeps a
+      # half-finished deploy unreachable rather than open; setting it to 0.0.0.0
+      # publishes to the world, which is a decision, not a default.
+      #
+      # Replay API. The bearer token is the only thing in front of it — put
+      # Cloudflare, a tunnel, or a firewall rule there before exposing it.
+      - "${HTTP_BIND:-127.0.0.1}:${HTTP_PORT:-28350}:${HTTP_PORT:-28350}"
+      # ZMQ re-publish. PUB has no authentication whatsoever: anyone who can
       # reach this port gets the full live feed. Loopback, or a private
       # network, and nothing else.
-      - "127.0.0.1:28340:28340"
+      - "${PUB_BIND_HOST:-127.0.0.1}:${PUB_PORT:-28340}:${PUB_PORT:-28340}"
 
     volumes:
       # The journal. This is the one piece of state worth keeping: losing it
