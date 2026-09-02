@@ -9,7 +9,7 @@
  */
 
 import { ConfigError } from "../core/errors.js";
-import { str, required, int, bool, zmqUrl } from "./env.js";
+import { str, required, int, bool, zmqUrl, zmqEndpoint, rpcEndpoint } from "./env.js";
 import type { Config } from "./types.js";
 
 export type { Config } from "./types.js";
@@ -19,17 +19,22 @@ export { loadDotEnv } from "./dotenv.js";
 const MIN_TOKEN_LENGTH = 24;
 
 export function loadConfig(): Config {
+  // The credentials may live in the URI or in the separate settings; either
+  // way what comes back is a credential-free URL and the pair to authenticate
+  // with. See rpcEndpoint() for why the URI form is preferred.
+  const rpc = rpcEndpoint("LTC_RPC_URL", "http://127.0.0.1:9332");
+
   const cfg: Config = {
-    rpcUrl: str("LTC_RPC_URL") ?? "http://127.0.0.1:9332",
-    rpcUser: required("LTC_RPC_USER"),
-    rpcPassword: required("LTC_RPC_PASSWORD"),
+    rpcUrl: rpc.url,
+    rpcUser: rpc.user,
+    rpcPassword: rpc.password,
     rpcWallet: str("LTC_RPC_WALLET"),
 
     // 28334 is Core's conventional -zmqpubrawtx port. 28332 is usually
     // -zmqpubhashtx, which publishes bare txids: subscribing to that would
     // leave the tap with nothing to journal and nothing to re-publish.
-    zmqTxUrl: zmqUrl("LTC_ZMQ_TX_URL", "tcp://127.0.0.1:28334"),
-    zmqBlockUrl: zmqUrl("LTC_ZMQ_BLOCK_URL", "tcp://127.0.0.1:28333"),
+    zmqTxUrl: zmqEndpoint("LTC_ZMQ_TX_URL", "tcp://127.0.0.1:28334"),
+    zmqBlockUrl: zmqEndpoint("LTC_ZMQ_BLOCK_URL", "tcp://127.0.0.1:28333"),
 
     pubBind: zmqUrl("PUB_BIND", "tcp://127.0.0.1:28340"),
 
