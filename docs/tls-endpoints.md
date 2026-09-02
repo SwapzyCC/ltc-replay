@@ -101,23 +101,22 @@ docker compose up -d --build
 docker compose logs -f
 ```
 
-**Use the bridge shape, not host networking.** `docker-compose.yml` ships two:
-Shape A joins litecoind's network, Shape B is `network_mode: host`. Both exist
+**The endpoints come from `.env`, not from the compose file.** The three URLs
+are interpolated as `${LTC_RPC_URL:-http://litecoind:9332}` and so on, so a
+remote TLS endpoint needs no edit to `docker-compose.yml` at all. The container
+names are only the fallback for when `.env` says nothing.
+
+**Drop the `networks:` block.** `docker-compose.yml` ships two shapes: Shape A
+joins litecoind's Docker network, Shape B is `network_mode: host`. Both exist
 for a relay sitting next to Core. When the endpoints are remote the container
-needs no host network at all — plain bridge networking reaches
-`zmq.example.dev` like any other outbound connection.
+needs neither — plain bridge networking reaches `zmq.example.dev` like any
+other outbound connection, and the `external: true` network would just fail to
+resolve.
 
 ```yaml
-services:
-  ltc-replay:
-    build: .
-    restart: unless-stopped
-    env_file: .env
-    volumes:
-      - ./data:/app/data
-    ports:
-      - "127.0.0.1:28350:28350" # bind loopback; section 3 exposes it deliberately
-    stop_grace_period: 30s
+# what to remove for a remote node
+networks:
+  - litecoin # and the top-level networks: block
 ```
 
 **Loopback in the URI means the container's loopback.** If you kept the
@@ -126,6 +125,13 @@ container cannot reach it — `127.0.0.1` inside a container is the container's
 own stack. That is what Shape B (`network_mode: host`) is for. Remote TLS
 endpoints have no such problem, which is one more reason to prefer the bridge
 when they are remote.
+
+**`HTTP_BIND` is the host side under Docker.** The process always binds
+`0.0.0.0` inside the container, because a container process on `127.0.0.1` is
+reachable from nothing at all; `.env`'s `HTTP_BIND` decides which host
+interface the published port lands on. `PUB_PORT` and `PUB_BIND_HOST` do the
+same job for the ZMQ re-publisher, and exist only because compose cannot split
+a URI.
 
 **Keep `./data` on a real volume.** The journal is a SQLite file, and losing it
 means re-scanning from the configured start height. `stop_grace_period: 30s`
@@ -301,18 +307,18 @@ ufw allow from 203.0.113.10 to any port 28333,28334,9332 proto tcp
 
 ## When it does not work
 
-| Symptom                                                     | Cause                                                                                                                                |
-| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| Symptom                                                     | Cause                                                                                                                                 |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
 | Boot fails naming `LTC_ZMQ_TX_URL` or `LTC_RPC_URL`         | The URI is malformed — usually an unencoded `@` or `$` in the password. The message names the variable and never prints the password. |
 | `ltc-zmq TLS tunnel failed` in the logs                     | Certificate does not verify, or the hostname does not match. Check with section 4 step 1. This is never downgraded to plaintext.      |
-| Tunnel connects, `tap.txSeen` stays at 0                    | Subscribed to a topic the publisher never sends — almost always 28333/28334 crossed.                                                 |
+| Tunnel connects, `tap.txSeen` stays at 0                    | Subscribed to a topic the publisher never sends — almost always 28333/28334 crossed.                                                  |
 | In Docker: `ECONNREFUSED 127.0.0.1`                         | Loopback in the URI is the container's own. Use `network_mode: host`, or the remote TLS endpoint.                                     |
-| TLS fails on every certificate at once                      | Host clock skew. Certificates read as expired or not-yet-valid.                                                                      |
-| Frames arrive, then stop every ~10 minutes and resume       | Node-side `proxy_timeout` left at nginx's default. See section 5.                                                                    |
-| `/v1/replay` returns a truncated body on large gaps         | `proxy_read_timeout` too low on the relay API server. See section 3.                                                                 |
-| Everything works for 90 days, then TLS fails                | Certificate renewed without the nginx reload hook. See section 5.                                                                    |
+| TLS fails on every certificate at once                      | Host clock skew. Certificates read as expired or not-yet-valid.                                                                       |
+| Frames arrive, then stop every ~10 minutes and resume       | Node-side `proxy_timeout` left at nginx's default. See section 5.                                                                     |
+| `/v1/replay` returns a truncated body on large gaps         | `proxy_read_timeout` too low on the relay API server. See section 3.                                                                  |
+| Everything works for 90 days, then TLS fails                | Certificate renewed without the nginx reload hook. See section 5.                                                                     |
 | RPC returns 401 through nginx but works on loopback         | The `Authorization` header is being dropped. Keep `proxy_set_header Authorization $http_authorization;`.                              |
-| `nginx: [emerg] "proxy_pass" directive is not allowed here` | A stream config landed in `conf.d/`. See section 5.                                                                                  |
+| `nginx: [emerg] "proxy_pass" directive is not allowed here` | A stream config landed in `conf.d/`. See section 5.                                                                                   |
 | `nginx -t` passes but the ZMQ ports do not listen           | `stream { }` missing from `nginx.conf`, so `stream.d/` is never included. Nothing warns about this.                                   |
 
 ## Related
