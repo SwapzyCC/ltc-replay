@@ -38,6 +38,16 @@
  *
  * Both report the range they can speak for, so "not found" is never confused
  * with "never happened".
+ *
+ * One method writes rather than reads. The relay only indexes transactions
+ * paying an address on its watchlist, and that list is the one thing it cannot
+ * work out from the chain, so the consumer owns it:
+ *
+ *   await client.watch([address]);   // when an address is derived
+ *   await client.syncWatched(all);   // at boot, and on a timer
+ *
+ * Register the address *before* handing it to a user and no rescan is ever
+ * needed: the filter only drops what arrived before the address did.
  */
 
 export interface ReplayTip {
@@ -147,6 +157,52 @@ export interface AddressHistoryOptions {
   includeHex?: boolean;
 }
 
+/** One row of the relay's watchlist. */
+export interface WatchedAddress {
+  address: string;
+  label: string | null;
+  addedAt: number;
+  source: string;
+}
+
+export interface WatchList {
+  /** How many addresses the relay is watching in total, not just on this page. */
+  count: number;
+  /** False when WATCHLIST_ONLY is off and the relay indexes the whole chain. */
+  enabled: boolean;
+  query: { limit: number; offset: number };
+  addresses: WatchedAddress[];
+}
+
+export interface WatchResult {
+  requested: number;
+  /** New to the relay. The difference from `requested` was already watched. */
+  added: number;
+  alreadyWatched: number;
+  count: number;
+  rescan: {
+    requested: number;
+    blocks: number;
+    fromHeight: number | null;
+    toHeight: number | null;
+    /** Present when the rescan failed. The addresses were still added. */
+    error?: string;
+  };
+}
+
+export interface WatchOptions {
+  /** Operator-facing note stored with each address. */
+  label?: string;
+  /**
+   * Re-index this many recent blocks against the new addresses.
+   *
+   * Only needed when an address may already have been paid — an import, or a
+   * registry that fell out of sync. Capped by the relay's
+   * WATCH_RESCAN_MAX_BLOCKS, and a request over that cap is rejected outright.
+   */
+  rescanBlocks?: number;
+}
+
 export interface LtcReplayClientOptions {
   /** e.g. http://10.0.0.4:28350 */
   baseUrl: string;
@@ -192,6 +248,30 @@ export class LtcReplayClient {
       if (!res.ok) {
         throw new LtcReplayError(
           `GET ${path} → HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`,
+        );
+      }
+      return (await res.json()) as T;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  private async send<T>(method: string, path: string, body?: unknown): Promise<T> {
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), this.timeoutMs);
+    try {
+      const res = await fetch(`${this.baseUrl}${path}`, {
+        method,
+        headers: {
+          ...this.headers(),
+          ...(body === undefined ? {} : { "content-type": "application/json" }),
+        },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        signal: ac.signal,
+      });
+      if (!res.ok) {
+        throw new LtcReplayError(
+          `${method} ${path} → HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`,
         );
       }
       return (await res.json()) as T;
@@ -250,9 +330,79 @@ export class LtcReplayClient {
     if (opts.includeHex) q.set("includeHex", "true");
 
     const query = q.size > 0 ? `?${q.toString()}` : "";
-    return await this.getJson<AddressHistory>(
-      `/v1/address/${encodeURIComponent(address)}${query}`,
-    );
+    return await this.getJson<AddressHistory>(`/v1/address/${encodeURIComponent(address)}${query}`);
+  }
+
+  /**
+   * Registers addresses to index. Idempotent, so re-sending the whole registry
+   * is a normal thing to do rather than an error.
+   *
+   * Call this when an address is derived, before it is shown to anyone. The
+   * relay drops transactions paying addresses it does not know about, so an
+   * address that is published before it is registered has a window in which a
+   * deposit to it is not indexed — recoverable only by a rescan.
+   */
+  async watch(addresses: readonly string[], opts: WatchOptions = {}): Promise<WatchResult> {
+    if (addresses.length === 0) {
+      return {
+        requested: 0,
+        added: 0,
+        alreadyWatched: 0,
+        count: (await this.watchedCount()).count,
+        rescan: { requested: 0, blocks: 0, fromHeight: null, toHeight: null },
+      };
+    }
+
+    return await this.send<WatchResult>("POST", "/v1/watch", {
+      addresses,
+      ...(opts.label === undefined ? {} : { label: opts.label }),
+      ...(opts.rescanBlocks === undefined ? {} : { rescanBlocks: opts.rescanBlocks }),
+    });
+  }
+
+  /**
+   * Stops watching an address. Rows already indexed for it are kept — they are
+   * history a reconciliation may still need — and age out with retention.
+   */
+  async unwatch(address: string): Promise<{ removed: boolean; count: number }> {
+    return await this.send("DELETE", `/v1/watch/${encodeURIComponent(address)}`);
+  }
+
+  /** A page of the watchlist, most recently added first. */
+  async watched(limit = 200, offset = 0): Promise<WatchList> {
+    return await this.getJson<WatchList>(`/v1/watch?limit=${limit}&offset=${offset}`);
+  }
+
+  /** Just the size of the watchlist — the cheap call a sync loop makes. */
+  async watchedCount(): Promise<{ count: number; enabled: boolean }> {
+    return await this.getJson<{ count: number; enabled: boolean }>("/v1/watch?limit=0");
+  }
+
+  /**
+   * Makes sure the relay is watching every address the consumer knows about.
+   *
+   * The watchlist is the only part of the relay's database that cannot be
+   * rebuilt from the chain, so a relay that was reinstalled, or whose journal
+   * was deleted to reclaim disk, comes back watching nothing — and indexes
+   * nothing, silently, until someone notices deposits have stopped. Call this
+   * at boot and on a timer.
+   *
+   * The count check first is what makes it cheap enough to run often: pushing
+   * only when the relay knows fewer addresses than we do turns the periodic
+   * case into one small GET.
+   *
+   * @returns how many addresses were newly registered.
+   */
+  async syncWatched(addresses: readonly string[], chunkSize = 5_000): Promise<number> {
+    const { count } = await this.watchedCount();
+    if (count >= addresses.length) return 0;
+
+    let added = 0;
+    for (let i = 0; i < addresses.length; i += chunkSize) {
+      const res = await this.watch(addresses.slice(i, i + chunkSize));
+      added += res.added;
+    }
+    return added;
   }
 
   /**
@@ -262,6 +412,12 @@ export class LtcReplayClient {
    * Throws rather than ending quietly if a page is truncated — a silent short
    * read here would look exactly like "you are up to date", and the consumer
    * would skip the blocks it never received.
+   *
+   * Each block's `txs` carries only transactions paying a watched address,
+   * while `nTx` reports the block's real size — so a block with two entries
+   * out of three thousand is normal, not a truncated read. The filtering
+   * happens against the watchlist as it is *now*, not as it was when the block
+   * arrived, because this reads the node rather than the index.
    */
   async *replayBlocks(sinceHeight: number): AsyncGenerator<ReplayBlock, void, void> {
     let cursor = sinceHeight;

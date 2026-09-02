@@ -16,14 +16,16 @@ CloudWatch all ingest without a parser.
 
 ## What to alert on
 
-| Signal                           | Where       | Means                                                       |
-| -------------------------------- | ----------- | ----------------------------------------------------------- |
-| `lagBlocks` sustained above 0    | `/v1/tip`   | Catch-up has not finished. Node slow or unreachable.        |
-| `tap.coreGaps` climbing          | `/v1/stats` | Core's high-water mark is dropping frames.                  |
-| `tap.txSeen` flat, busy mempool  | `/v1/stats` | The tap is not receiving. Usually the wrong ZMQ port.       |
-| `lastBlockAt` older than ~30 min | `/v1/stats` | No block frames. Node stalled, or the block topic is wrong. |
-| `/health` not answering          | `/health`   | Process down.                                               |
-| `indexFloorHeight` rising fast   | `/v1/stats` | The index is trimming more than expected.                   |
+| Signal                            | Where       | Means                                                       |
+| --------------------------------- | ----------- | ----------------------------------------------------------- |
+| `lagBlocks` sustained above 0     | `/v1/tip`   | Catch-up has not finished. Node slow or unreachable.        |
+| `tap.coreGaps` climbing           | `/v1/stats` | Core's high-water mark is dropping frames.                  |
+| `tap.txSeen` flat, busy mempool   | `/v1/stats` | The tap is not receiving. Usually the wrong ZMQ port.       |
+| `lastBlockAt` older than ~30 min  | `/v1/stats` | No block frames. Node stalled, or the block topic is wrong. |
+| `/health` not answering           | `/health`   | Process down.                                               |
+| `indexFloorHeight` rising fast    | `/v1/stats` | The index is trimming more than expected.                   |
+| `watchlist.count` 0 while enabled | `/v1/stats` | **Nothing is being indexed.** See below.                    |
+| `watchlist.count` below yours     | `/v1/stats` | The relay is missing addresses the consumer knows about.    |
 
 `lagBlocks` briefly non-zero after a restart is normal — that is catch-up
 doing its job. Sustained is the alert.
@@ -40,6 +42,36 @@ journalctl -u ltc-replay -n 100 | grep -i catchup
 Catch-up writes at most 2000 blocks per pass, so a badly stale journal makes
 visible progress across several passes rather than in one. If it is moving,
 wait. If it is not, the RPC credentials or the node itself are the problem.
+
+### The watchlist is empty, or short
+
+This is the failure mode with no symptoms. With `WATCHLIST_ONLY=true` a relay
+whose watchlist is empty matches no transaction, so it writes no rows, logs no
+errors and answers `/v1/stats` with counters that look exactly like a quiet
+chain. Meanwhile every deposit on the network goes unindexed.
+
+```bash
+curl -sH "Authorization: Bearer $AUTH_TOKEN" localhost:28350/v1/stats \
+  | jq '.watchlist'
+```
+
+`{"enabled": true, "count": 0}` is the alert. The relay also warns at boot and
+after the last address is removed:
+
+```
+WARN [watchlist] watchlist is empty and WATCHLIST_ONLY is on — NOTHING is being indexed.
+```
+
+The fix is always the same: have the consumer push its registry again. The
+watchlist is the one part of this database that cannot be rebuilt from the
+chain, so a reinstalled relay — or one whose journal was deleted to reclaim
+disk — comes back empty by construction. The bundled client's `syncWatched()`
+handles it at boot; if the count is short rather than zero, that call is either
+not running or not passing the full set.
+
+Comparing the relay's count against the consumer's own is the more useful of the
+two alerts, because it catches the address that was derived while the relay was
+down as well as the wholesale case.
 
 ### `coreGaps` is climbing
 
@@ -82,8 +114,12 @@ curl -sH "Authorization: Bearer $AUTH_TOKEN" localhost:28350/v1/stats \
 ### What actually takes the space
 
 Not the event log. The two indexes, by roughly an order of magnitude — and
-`address_txs` is the larger of the two, because it holds a row for **every
-addressable output on the chain**, not only the addresses you watch.
+`address_txs` is the larger of the two.
+
+How much larger depends on one setting. With `WATCHLIST_ONLY=true` (the
+default) a row exists only for an output paying an address you registered, so
+the index is sized by your deposit rate. With it off, there is a row for **every
+addressable output on the chain**, and it is sized by Litecoin.
 
 Per row, including the secondary indexes each table carries:
 
@@ -94,16 +130,36 @@ Per row, including the secondary indexes each table carries:
 | `events` (`tx`)    | one per mempool sighting      | ~520                      |
 | `events` (`block`) | 576/day, permanent            | ~110                      |
 
-At ~2.3 addressable outputs per transaction that is **~1.5 KB per transaction**
-held inside the index window, and the window is `TX_INDEX_BLOCKS / 576` days.
+At ~2.3 addressable outputs per transaction that is **~1.5 KB per stored
+transaction** held inside the index window, and the window is
+`TX_INDEX_BLOCKS / 576` days.
 
 ```
-index bytes   = tx_per_day * (TX_INDEX_BLOCKS / 576) * 1.5 KB
-mempool bytes = tx_per_day * (TX_RETENTION_HOURS / 24) * 0.52 KB
+stored_per_day = deposits/day        with WATCHLIST_ONLY=true
+               = chain tx/day        with WATCHLIST_ONLY=false
+
+index bytes     = stored_per_day * (TX_INDEX_BLOCKS / 576) * 1.5 KB
+mempool bytes   = stored_per_day * (TX_RETENTION_HOURS / 24) * 0.52 KB
+block bytes     = 576 * days_running * 0.11 KB        # permanent, ~23 MB/year
+watchlist bytes = watched_addresses * 0.1 KB
 ```
 
-Litecoin runs roughly 576 blocks a day; take your own transaction rate from
-`getchaintxstats`. At 100k transactions/day:
+Litecoin runs roughly 576 blocks a day; take the chain's transaction rate from
+`getchaintxstats` and your own from your deposit volume.
+
+**Filtered — the default.** At `TX_INDEX_BLOCKS=20000` (about 35 days):
+
+| Deposits/day | Index   | + 1 year of block records | Steady state |
+| ------------ | ------- | ------------------------- | ------------ |
+| 100          | ~5 MB   | ~23 MB                    | **~30 MB**   |
+| 1,000        | ~52 MB  | ~23 MB                    | **~75 MB**   |
+| 10,000       | ~520 MB | ~23 MB                    | **~545 MB**  |
+
+Below a few thousand deposits a day the permanent block records — 576 rows a
+day, forever — are the larger half of the database, and no index setting
+touches them. That is the floor.
+
+**Unfiltered.** `WATCHLIST_ONLY=false`, at 100k chain transactions/day:
 
 | Settings                                      | Steady state |
 | --------------------------------------------- | ------------ |
@@ -113,8 +169,8 @@ Litecoin runs roughly 576 blocks a day; take your own transaction rate from
 | `TX_INDEX_BLOCKS=1440` (2.5 days), address on | ~530 MB      |
 
 Halve those at 50k tx/day, double them at 200k. Add ~15% for the WAL and for
-free pages SQLite does not hand back to the filesystem. Treat the whole table as
-an estimate: `sizeBytes` from `/v1/stats` is the only number that is actually
+free pages SQLite does not hand back to the filesystem. Treat every table here
+as an estimate: `sizeBytes` from `/v1/stats` is the only number that is actually
 true about your deployment.
 
 Growth is bounded rather than open-ended. `address_txs` rows whose transaction
@@ -123,20 +179,32 @@ settle at the window instead of accumulating.
 
 Levers, in the order worth pulling:
 
-1. Lower `TX_INDEX_BLOCKS`. Biggest effect. Costs you the ability to answer
-   about older transactions — see [Pruned nodes](pruned-nodes.md) for the
-   trade.
-2. Lower `TX_RETENTION_HOURS`. Drops old mempool bodies. Deposits are still
+1. `WATCHLIST_ONLY=true`. Two orders of magnitude, and it is the default.
+   Costs nothing if you register addresses as you derive them; costs you
+   deposits to addresses you forgot to register, which is why the empty-list
+   alert below matters.
+2. Lower `TX_INDEX_BLOCKS`. Biggest effect on what remains. Costs you the
+   ability to answer about older transactions — see
+   [Pruned nodes](pruned-nodes.md) for the trade.
+3. Lower `TX_RETENTION_HOURS`. Drops old mempool bodies. Deposits are still
    recovered from blocks.
-3. `ADDRESS_INDEX=false`. Only if you never query by address.
+4. `ADDRESS_INDEX=false`. Only if you never query by address.
 
 Pruning runs every 15 minutes and checkpoints the WAL when it removes anything.
 A failure is logged and never takes the service down — it is housekeeping.
 
 ## Backup
 
-The journal is **disposable**. It is a cache of what the chain already says, and
-catch-up rebuilds block history from the node.
+The journal is **disposable, with one exception**. It is a cache of what the
+chain already says, and catch-up rebuilds block history from the node.
+
+The exception is `watched_addresses`. Nothing in the chain records which
+addresses you care about, so a rebuilt journal comes back watching nothing — and
+indexes nothing, silently, until someone notices deposits have stopped. The
+consumer is expected to re-push its registry after any rebuild; the bundled
+client's `syncWatched()` does this at boot by comparing counts. If your consumer
+does not, back this table up, or you have turned a disposable cache into
+something that is not.
 
 If you want a copy anyway, use SQLite's backup rather than `cp` — the database
 is in WAL mode and a plain copy can catch it mid-write:

@@ -14,6 +14,11 @@ re-publishing it, and lets a consumer ask for what it missed. It also keeps the
 two indexes a pruned node cannot keep for itself, so "did this deposit confirm?"
 has an answer.
 
+It stores only what you asked for. Register your addresses with
+`POST /v1/watch` and every other transaction on the chain is decoded, counted
+and dropped — which is the difference between a database sized by your deposits
+and one sized by Litecoin.
+
 ```mermaid
 flowchart LR
   CORE["Litecoin Core<br/>(pruned is fine)"]
@@ -151,12 +156,19 @@ Everything except `/health` needs `Authorization: Bearer <AUTH_TOKEN>`.
 | `GET /v1/tx/<txid>`                      | Confirmation status. Replaces `getrawtransaction`.             |
 | `GET /v1/address/<address>`              | Payments to an address, split confirmed / unconfirmed.         |
 | `GET /v1/stats`                          | Journal counts, tap counters, Core-drop count.                 |
+| `GET /v1/watch`                          | The addresses being indexed. `?limit=0` returns just a count.  |
+| `POST /v1/watch`                         | Register addresses to index. Idempotent, bulk.                 |
+| `DELETE /v1/watch/<address>`             | Stop watching one address. Its history is kept.                |
 
 ```bash
 curl -sH "Authorization: Bearer $AUTH_TOKEN" localhost:28350/v1/tip
 curl -sH "Authorization: Bearer $AUTH_TOKEN" localhost:28350/v1/tx/$TXID
 curl -sH "Authorization: Bearer $AUTH_TOKEN" \
   "localhost:28350/v1/address/$ADDR?minConfirmations=6"
+
+# Nothing is indexed until an address is registered.
+curl -sH "Authorization: Bearer $AUTH_TOKEN" -H 'content-type: application/json' \
+  -d "{\"addresses\":[\"$ADDR\"]}" localhost:28350/v1/watch
 ```
 
 `/v1/replay` terminates its stream with `{"done":true,"nextHeight":…,"hasMore":…}`.
@@ -198,6 +210,19 @@ Persist the height inside the loop, not after it. An interrupted catch-up then
 resumes from the last block it actually finished, and re-processing one block is
 harmless as long as credits are keyed on `(txid, vout)` — which they must be
 anyway.
+
+**Register the addresses.** Nothing is indexed until you do. Push each address
+as it is derived — before it is shown to anyone — and re-push the whole set at
+boot, because the watchlist is the one part of the relay's database that cannot
+be rebuilt from the chain:
+
+```ts
+await client.watch([address]); // when derived
+await client.syncWatched(allKnownAddresses); // at boot, and on a timer
+```
+
+`syncWatched` compares counts first, so the periodic call is one small GET
+until the relay has actually been rebuilt.
 
 **Confirmation status.** Replace `getrawtransaction` with `client.txStatus(txid)`
 and `client.addressHistory(address, { minConfirmations: 6 })`. Both report the
