@@ -8,6 +8,7 @@ Start with whichever of these matches what you are trying to do.
 | [Pruned nodes](pruned-nodes.md)     | Your node runs with `prune=`. Read this before anything else — it changes the design. |
 | [Configuration](configuration.md)   | You are filling in `.env` and want to know what each value actually controls.         |
 | [Deployment](deployment.md)         | You are putting this on the node's host, with systemd or with Docker.                 |
+| [TLS endpoints](tls-endpoints.md)   | The node's ZMQ or RPC is behind TLS, or the relay runs off-box.                        |
 | [API reference](api.md)             | You are calling the HTTP endpoints directly.                                          |
 | [Integration guide](integration.md) | You are wiring a deposit monitor or wallet backend to it.                             |
 | [Operations](operations.md)         | It is running and you need to watch it, size it, or fix it.                           |
@@ -27,6 +28,7 @@ Core cannot, so a confirmed deposit is still resolvable.
 1. [Pruned nodes](pruned-nodes.md) — five minutes, and it determines whether
    the rest of your plan is even possible.
 2. [Deployment](deployment.md) — node config, then the service.
+   [TLS endpoints](tls-endpoints.md) if the relay is not on the node's host.
 3. [Configuration](configuration.md) — the two index settings deserve a
    decision rather than a default.
 4. [Integration guide](integration.md) — the consumer side, including the

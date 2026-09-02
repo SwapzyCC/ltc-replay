@@ -169,7 +169,9 @@ none at all** — anyone who can reach `PUB_BIND` reads every transaction the ta
 sees, which is a live view of your deposit flow.
 
 A WireGuard tunnel between the two hosts is the better arrangement. If the HTTP
-port crosses anything public, terminate TLS in front of it.
+port crosses anything public, terminate TLS in front of it — [TLS endpoints](tls-endpoints.md)
+has the nginx config, and covers the reverse case too: consuming a node whose ZMQ
+and RPC are already behind TLS.
 
 The service names either port at boot if it is bound off-box. That warning is
 worth reading rather than filtering out.
@@ -211,6 +213,7 @@ height rather than the current tip — but nothing can walk below the node's
 
 ## Related
 
+- [TLS endpoints](tls-endpoints.md) — nginx, and running the relay off the node's host
 - [Configuration](configuration.md) — what every value controls
 - [Operations](operations.md) — monitoring, sizing, troubleshooting
 - [Pruned nodes](pruned-nodes.md) — read this before configuring Core
