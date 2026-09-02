@@ -17,7 +17,11 @@
  * ignored every one of those frames anyway.
  */
 
-import { Subscriber, Publisher } from "zeromq";
+import { Publisher } from "zeromq";
+import {
+  createLtcZmqSubscriber,
+  type LtcZmqSubscription,
+} from "../chain/zmq/index.js";
 import type { Config } from "../config/index.js";
 import type { Journal, AddressPayment } from "../journal/index.js";
 import { logger, errMsg } from "../core/log.js";
@@ -42,8 +46,10 @@ export interface TapStats {
 
 export class Tap {
   private running = false;
-  private txSocket: Subscriber | null = null;
-  private blockSocket: Subscriber | null = null;
+  // Subscriptions, not raw sockets: a tls:// endpoint owns a loopback TLS
+  // bridge as well as a socket, and closing half of it leaks the other.
+  private txSocket: LtcZmqSubscription | null = null;
+  private blockSocket: LtcZmqSubscription | null = null;
   private pub: Publisher | null = null;
 
   private readonly coreSeq = new Map<string, number>();
@@ -103,31 +109,56 @@ export class Tap {
     url: string,
     handle: (frames: Buffer[]) => Promise<void>,
   ): Promise<void> {
+    const label = topic === "rawtx" ? "LTC_ZMQ_TX_URL" : "LTC_ZMQ_BLOCK_URL";
+
     while (this.running) {
-      const sock = new Subscriber();
-      // A generous receive buffer: a block's worth of mempool churn can arrive
-      // faster than SQLite commits, and dropping there would defeat the point.
-      sock.receiveHighWaterMark = 100_000;
-      sock.connect(url);
+      let sock: LtcZmqSubscription;
+      try {
+        // The URI's scheme picks the transport. Everything below this line is
+        // identical for a direct tcp:// socket and for one tunnelled through
+        // TLS — which is the point of the abstraction.
+        sock = await createLtcZmqSubscriber(url, {
+          label,
+          // A generous receive buffer: a block's worth of mempool churn can
+          // arrive faster than SQLite commits, and dropping there would defeat
+          // the point.
+          receiveHighWaterMark: 100_000,
+          log: (m) => log.info(m),
+          warn: (m) => log.warn(m),
+        });
+      } catch (err: unknown) {
+        // A malformed URI cannot be fixed by retrying, but the loop is the
+        // only thing keeping the tap alive, so it backs off rather than
+        // spinning. Config validation catches this at boot; reaching here
+        // means the endpoint was rejected at connect time.
+        log.error(`${topic}: could not connect`, errMsg(err));
+        await new Promise((r) => setTimeout(r, RECONNECT_DELAY_MS));
+        continue;
+      }
+
       sock.subscribe(topic);
 
       if (topic === "rawtx") this.txSocket = sock;
       else this.blockSocket = sock;
 
-      log.info(`subscribed to ${topic} at ${url}`);
+      // describe() masks the password. The raw URL must never reach a log.
+      log.info(`subscribed to ${topic} at ${sock.describe()}`);
 
       try {
         for await (const frames of sock) {
           if (!this.running) break;
-          await handle(frames as Buffer[]);
+          await handle(frames);
         }
       } catch (err: unknown) {
-        if (!this.running) return;
+        if (!this.running) {
+          sock.close();
+          return;
+        }
         log.error(`${topic} loop failed — reconnecting`, errMsg(err));
       }
 
-      if (!this.running) return;
       sock.close();
+      if (!this.running) return;
       await new Promise((r) => setTimeout(r, RECONNECT_DELAY_MS));
     }
   }
