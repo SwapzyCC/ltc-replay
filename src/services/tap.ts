@@ -9,6 +9,12 @@
  * Core stamps each frame with a per-topic sequence counter. Comparing it to
  * the last one seen is the only way to learn that Core's own high-water mark
  * dropped something, which is otherwise completely silent.
+ *
+ * Both jobs are gated on the watchlist. A transaction that pays no watched
+ * address is decoded, counted, and dropped: not journalled, not indexed, not
+ * re-published. That is the whole point of the filter — on a deposit monitor
+ * it discards upwards of 99.9% of mempool traffic, and the consumer would have
+ * ignored every one of those frames anyway.
  */
 
 import { Subscriber, Publisher } from "zeromq";
@@ -16,6 +22,7 @@ import type { Config } from "../config/index.js";
 import type { Journal, AddressPayment } from "../journal/index.js";
 import { logger, errMsg } from "../core/log.js";
 import { extractPayments } from "../chain/payments.js";
+import type { Watchlist } from "./watchlist.js";
 
 const log = logger("tap");
 
@@ -23,6 +30,8 @@ const RECONNECT_DELAY_MS = 2_000;
 
 export interface TapStats {
   txSeen: number;
+  /** Decoded, matched no watched address, and dropped. Normally the vast bulk. */
+  txFiltered: number;
   txJournalled: number;
   paymentsIndexed: number;
   blocksSeen: number;
@@ -41,6 +50,7 @@ export class Tap {
 
   private readonly stats: TapStats = {
     txSeen: 0,
+    txFiltered: 0,
     txJournalled: 0,
     paymentsIndexed: 0,
     blocksSeen: 0,
@@ -55,6 +65,7 @@ export class Tap {
   constructor(
     private readonly cfg: Config,
     private readonly journal: Journal,
+    private readonly watchlist: Watchlist,
   ) {}
 
   async start(): Promise<void> {
@@ -170,14 +181,24 @@ export class Tap {
       return;
     }
 
+    // The filter runs before the write, not after: storing the transaction and
+    // then deciding it was uninteresting would cost exactly what the watchlist
+    // exists to save. `mine` is every output paying an address we watch — with
+    // filtering off it is simply every addressable output.
+    const mine = this.watchlist.filter(payments);
+    if (mine.length === 0) {
+      this.stats.txFiltered += 1;
+      return;
+    }
+
     try {
       if (this.journal.appendTx(txid, payload) !== null) this.stats.txJournalled += 1;
 
       // Indexing addresses here is what makes an unconfirmed deposit visible
       // the moment the network sees it, rather than only once catch-up reaches
       // the block that includes it.
-      if (this.cfg.addressIndex && payments.length > 0) {
-        this.stats.paymentsIndexed += this.journal.indexAddressPayments(txid, payments);
+      if (this.cfg.addressIndex) {
+        this.stats.paymentsIndexed += this.journal.indexAddressPayments(txid, mine);
       }
     } catch (err: unknown) {
       log.error(`journal write failed for ${txid}`, errMsg(err));
