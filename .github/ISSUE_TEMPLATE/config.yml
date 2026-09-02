@@ -1,0 +1,14 @@
+blank_issues_enabled: false
+
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/BackStacked/ltc-replay/security/advisories/new
+    about: Report privately. Never in a public issue — see SECURITY.md.
+
+  - name: Deployment or configuration question
+    url: https://github.com/BackStacked/ltc-replay/discussions
+    about: Ask in Discussions. Check docs/ first — pruned-nodes.md and integration.md answer most of it.
+
+  - name: "My node is pruned and lookups return nothing"
+    url: https://github.com/BackStacked/ltc-replay/blob/main/docs/pruned-nodes.md
+    about: Read this first. Core cannot answer about a confirmed watch-only tx without txindex, and prune forbids txindex.

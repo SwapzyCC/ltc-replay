@@ -1,0 +1,109 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: check (node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["20", "22", "24"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      # better-sqlite3 and zeromq are native. Prebuilds cover the common cases;
+      # this only matters on a Node release new enough to have none yet.
+      - run: npm ci
+
+      - run: npm run lint
+      - run: npm run typecheck
+
+      # The suite needs no node, no network and no database file. If this ever
+      # starts requiring one, the test is wrong, not the runner.
+      - run: npm test
+
+      - run: npm run build
+
+      # The build copies *.sql into dist/. A missing statement file turns into
+      # a startup failure on the box rather than a red build, so check here.
+      - name: dist contains the SQL
+        run: |
+          test -f dist/journal/sql/schema.sql
+          test -f dist/journal/sql/queries.sql
+
+  format:
+    name: format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npm run format:check
+
+  docker:
+    name: docker build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: ltc-replay:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Boot far enough to prove the image is wired up. There is no node to
+      # talk to, so config validation is what we are exercising: the process
+      # must reject a missing AUTH_TOKEN rather than start without one.
+      - name: refuses to start without a token
+        run: |
+          set +e
+          out=$(docker run --rm -e LTC_RPC_URL=http://127.0.0.1:9332 ltc-replay:ci 2>&1)
+          code=$?
+          echo "$out"
+          test $code -ne 0 || { echo "started with no AUTH_TOKEN"; exit 1; }
+          echo "$out" | grep -qi 'AUTH_TOKEN' || { echo "did not name the missing setting"; exit 1; }
+
+  compose:
+    name: compose config
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # docker-compose.yml interpolates the endpoint URLs from .env. Prove the
+      # file still resolves, and that a .env value beats the built-in default —
+      # that override is the whole point and it fails silently when broken.
+      - name: resolves and .env wins
+        run: |
+          cp .env.example .env
+          printf '\nLTC_RPC_URL=https://user:pass@rpc.example.dev:9332\n' >> .env
+          docker compose config > resolved.yml
+          grep -q 'rpc.example.dev' resolved.yml \
+            || { echo "compose ignored .env"; sed -n '1,60p' resolved.yml; exit 1; }

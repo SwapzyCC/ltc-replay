@@ -1,8 +1,30 @@
 {
   "name": "ltc-replay",
   "version": "1.0.0",
-  "private": true,
   "description": "Durable ZMQ tap and replay service for a Litecoin Core node. Runs on the node VPS so consumers can restart without losing deposits.",
+  "license": "BSD-3-Clause",
+  "author": "Himanshu Singh",
+  "homepage": "https://github.com/BackStacked/ltc-replay#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/BackStacked/ltc-replay.git"
+  },
+  "bugs": {
+    "url": "https://github.com/BackStacked/ltc-replay/issues"
+  },
+  "keywords": [
+    "litecoin",
+    "litecoin-core",
+    "zeromq",
+    "zmq",
+    "blockchain",
+    "deposits",
+    "pruned-node",
+    "replay",
+    "sqlite",
+    "typescript"
+  ],
+  "private": true,
   "type": "module",
   "engines": {
     "node": ">=20"

@@ -1,0 +1,36 @@
+version: 2
+
+updates:
+  # Two native dependencies (better-sqlite3, zeromq) mean an update can break
+  # the build on a Node version prebuilds do not cover yet. CI runs the full
+  # matrix on every PR, which is what makes taking these safe.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels: ["dependencies"]
+    commit-message:
+      prefix: "chore(deps)"
+      prefix-development: "chore(deps-dev)"
+    groups:
+      dev-tooling:
+        dependency-type: development
+        patterns: ["*"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    labels: ["dependencies", "ci"]
+    commit-message:
+      prefix: "chore(ci)"
+
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: monthly
+    labels: ["dependencies", "docker"]
+    commit-message:
+      prefix: "chore(docker)"
