@@ -74,6 +74,15 @@ export interface AddressPayment {
   valueSat: bigint;
 }
 
+/** One row of the watchlist, as /v1/watch reports it. */
+export interface WatchedAddress {
+  address: string;
+  label: string | null;
+  addedAt: number;
+  /** Who put it here: "api" for a consumer push, "manual" for an operator. */
+  source: string;
+}
+
 export interface JournalStats {
   events: number;
   txs: number;
@@ -83,6 +92,7 @@ export interface JournalStats {
   indexedOutputs: number;
   indexedAddresses: number;
   indexFloorHeight: number | null;
+  watchedAddresses: number;
   sizeBytes: number;
 }
 

@@ -51,6 +51,7 @@ import type {
   JournalEvent,
   JournalStats,
   MinedTx,
+  WatchedAddress,
 } from "./types.js";
 
 export type {
@@ -65,7 +66,14 @@ export type {
   MinedTx,
   ReorgEvent,
   TxEvent,
+  WatchedAddress,
 } from "./types.js";
+
+/** What `addWatched` accepts. The label is free text for operators. */
+export interface WatchedInput {
+  address: string;
+  label?: string | null;
+}
 
 export class Journal {
   private readonly db: Db;
@@ -88,6 +96,8 @@ export class Journal {
     ts: number,
     payments: readonly AddressPayment[],
   ) => number;
+
+  private readonly writeWatched: (rows: readonly WatchedInput[], source: string) => number;
 
   private readonly dropFrom: (height: number) => number;
 
@@ -132,6 +142,19 @@ export class Journal {
         let n = 0;
         for (const p of payments) {
           n += this.stmt.insertAddressTx.run(p.address, txid, p.vout, p.valueSat, ts).changes;
+        }
+        return n;
+      },
+    );
+
+    // A consumer re-pushing its whole registry after a rebuild sends tens of
+    // thousands of addresses. One transaction, not one commit per address.
+    this.writeWatched = this.db.transaction(
+      (rows: readonly WatchedInput[], source: string): number => {
+        const ts = Date.now();
+        let n = 0;
+        for (const r of rows) {
+          n += this.stmt.insertWatched.run(r.address, r.label ?? null, ts, source).changes;
         }
         return n;
       },
@@ -277,6 +300,7 @@ export class Journal {
     const blocks = this.stmt.countBlocks.get() as { c: number };
     const indexed = this.stmt.countBlockTxs.get() as { c: number; h: number | null };
     const addresses = this.stmt.countAddressTxs.get() as { c: number; a: number };
+    const watched = this.stmt.countWatched.get() as { c: number };
 
     const pageCount = (this.db.pragma("page_count", { simple: true }) as number) || 0;
     const pageSize = (this.db.pragma("page_size", { simple: true }) as number) || 0;
@@ -290,8 +314,52 @@ export class Journal {
       indexedOutputs: addresses.c,
       indexedAddresses: addresses.a,
       indexFloorHeight: indexed.h,
+      watchedAddresses: watched.c,
       sizeBytes: pageCount * pageSize,
     };
+  }
+
+  // ── Watchlist ─────────────────────────────────────────────────────────────
+
+  /**
+   * Adds addresses to the watchlist. Returns how many were new.
+   *
+   * Idempotent, and deliberately so: the documented recovery from a rebuilt
+   * journal is for the consumer to re-push its entire address registry, and
+   * that must not reset every added_at or fail on the first duplicate.
+   */
+  addWatched(rows: readonly WatchedInput[], source = "api"): number {
+    if (rows.length === 0) return 0;
+    return this.writeWatched(rows, source);
+  }
+
+  /** Returns true when the address was on the list. */
+  removeWatched(address: string): boolean {
+    return this.stmt.deleteWatched.run(address).changes > 0;
+  }
+
+  /** The whole list, for loading the in-memory set the hot path checks. */
+  allWatched(): string[] {
+    return (this.stmt.allWatched.all() as Array<{ address: string }>).map((r) => r.address);
+  }
+
+  listWatched(limit: number, offset: number): WatchedAddress[] {
+    const rows = this.stmt.listWatched.all(limit, offset) as Array<{
+      address: string;
+      label: string | null;
+      added_at: number;
+      source: string;
+    }>;
+    return rows.map((r) => ({
+      address: r.address,
+      label: r.label,
+      addedAt: r.added_at,
+      source: r.source,
+    }));
+  }
+
+  countWatched(): number {
+    return (this.stmt.countWatched.get() as { c: number }).c;
   }
 
   // ── Maintenance ───────────────────────────────────────────────────────────

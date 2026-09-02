@@ -103,3 +103,27 @@ CREATE TABLE IF NOT EXISTS meta (
   k TEXT PRIMARY KEY,
   v TEXT NOT NULL
 );
+
+-- ── watched_addresses ───────────────────────────────────────────────────────
+--
+-- The addresses this relay actually cares about.
+--
+-- Indexing every addressable output on the chain costs roughly 1.5 KB per
+-- transaction and answers a question nobody asked: a deposit monitor watches a
+-- known set of addresses, and everything else on the chain is noise it pays to
+-- store. With WATCHLIST_ONLY on, a transaction that pays nothing in this table
+-- is dropped before it is journalled, indexed or re-published.
+--
+-- This table is the one part of the journal that is NOT reconstructible from
+-- the chain. It is a cache of the consumer's own address registry, and the
+-- consumer is expected to re-push it after a rebuild — see /v1/watch and the
+-- sync loop in the integration guide. `source` records who put it here so an
+-- operator can tell a manual entry from a synced one.
+CREATE TABLE IF NOT EXISTS watched_addresses (
+  address  TEXT    NOT NULL PRIMARY KEY,
+  label    TEXT,
+  added_at INTEGER NOT NULL,
+  source   TEXT    NOT NULL DEFAULT 'api'
+) WITHOUT ROWID;
+
+CREATE INDEX IF NOT EXISTS watched_added_at ON watched_addresses(added_at);
