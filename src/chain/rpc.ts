@@ -14,6 +14,7 @@
 import type { Config } from "../config/index.js";
 import { RpcError } from "../core/errors.js";
 import { errMsg } from "../core/log.js";
+import { rpcAuthHeader } from "./rpc-uri.js";
 
 export { RpcError, isNotFound } from "../core/errors.js";
 
@@ -67,7 +68,9 @@ export class LitecoinRpc {
   constructor(cfg: Pick<Config, "rpcUrl" | "rpcUser" | "rpcPassword" | "rpcWallet">) {
     const base = cfg.rpcUrl.replace(/\/+$/, "");
     this.url = cfg.rpcWallet ? `${base}/wallet/${encodeURIComponent(cfg.rpcWallet)}` : base;
-    this.auth = `Basic ${Buffer.from(`${cfg.rpcUser}:${cfg.rpcPassword}`).toString("base64")}`;
+    // Config refuses to boot without credentials, so the undefined branch is
+    // unreachable; the ?? keeps that fact local rather than asserting it.
+    this.auth = rpcAuthHeader(cfg.rpcUser, cfg.rpcPassword) ?? "";
   }
 
   async call<T>(
