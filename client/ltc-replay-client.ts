@@ -28,6 +28,16 @@
  * Persisting inside the loop is deliberate: an interrupted catch-up resumes
  * from the last block it actually finished, and re-processing one block is
  * harmless as long as credits are keyed on txid:vout.
+ *
+ * Two further methods exist for the pruned-node case specifically, where
+ * `getrawtransaction` cannot answer at all:
+ *
+ *   txStatus(txid)              mined / mempool / unknown, with depth.
+ *   addressHistory(address)     every payment seen to an address, split into
+ *                               confirmed and unconfirmed.
+ *
+ * Both report the range they can speak for, so "not found" is never confused
+ * with "never happened".
  */
 
 export interface ReplayTip {
@@ -63,6 +73,80 @@ export type ReplayEvent =
       source: string;
     };
 
+/**
+ * Confirmation status for one transaction.
+ *
+ * `unknown` is returned with HTTP 404 and is only a negative answer *within*
+ * `indexedFrom`..`indexedTo`. Asking about a transaction older than
+ * `indexedFrom` tells you nothing — check the range before concluding a
+ * payment did not happen.
+ */
+export interface TxStatus {
+  txid: string;
+  status: "mined" | "mempool" | "unknown";
+  blockHeight: number | null;
+  blockHash: string | null;
+  /** null when the node was unreachable; 0 for a mempool sighting. */
+  confirmations: number | null;
+  firstSeenAt?: number;
+  indexedFrom: number | null;
+  indexedTo: number | null;
+}
+
+/** One output paying the queried address. Amounts are integer litoshi strings. */
+export interface AddressEntry {
+  txid: string;
+  vout: number;
+  /** Integer litoshis, as a string. Parse with BigInt, never Number. */
+  valueSat: string;
+  /** The same amount to 8 dp, for display only. */
+  valueLtc: string;
+  status: "confirmed" | "unconfirmed";
+  confirmations: number;
+  blockHeight: number | null;
+  blockHash: string | null;
+  firstSeenAt: number;
+  /** Raw transaction hex, only when includeHex was requested. */
+  hex: string | null;
+}
+
+export interface AddressHistory {
+  address: string;
+  query: { limit: number; minConfirmations: number; includeHex: boolean };
+  /** What the relay could possibly know. Read this before trusting an empty list. */
+  coverage: {
+    addressIndexEnabled: boolean;
+    indexedFrom: number | null;
+    indexedTo: number | null;
+    nodeHeight: number | null;
+    lagBlocks: number | null;
+  };
+  totals: {
+    confirmedSat: string;
+    confirmedLtc: string;
+    unconfirmedSat: string;
+    unconfirmedLtc: string;
+    totalSat: string;
+    totalLtc: string;
+    confirmedCount: number;
+    unconfirmedCount: number;
+  };
+  confirmed: AddressEntry[];
+  unconfirmed: AddressEntry[];
+  /** True when more entries exist than were returned; totals cover this page only. */
+  truncated: boolean;
+  totalEntries: number;
+}
+
+export interface AddressHistoryOptions {
+  /** Max entries to return. The relay caps this at 1000. */
+  limit?: number;
+  /** Depth at which this caller considers a payment final. Defaults to 1. */
+  minConfirmations?: number;
+  /** Include raw transaction hex. Large; off by default. */
+  includeHex?: boolean;
+}
+
 export interface LtcReplayClientOptions {
   /** e.g. http://10.0.0.4:28350 */
   baseUrl: string;
@@ -93,7 +177,7 @@ export class LtcReplayClient {
     return { authorization: `Bearer ${this.token}`, accept: "application/json" };
   }
 
-  private async getJson<T>(path: string): Promise<T> {
+  private async getJson<T>(path: string, allow404 = false): Promise<T> {
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(), this.timeoutMs);
     try {
@@ -101,8 +185,14 @@ export class LtcReplayClient {
         headers: this.headers(),
         signal: ac.signal,
       });
+      // /v1/tx answers 404 with a full, meaningful body: status "unknown" plus
+      // the indexed range that makes the absence interpretable. Throwing it
+      // away would lose exactly the information the caller needs.
+      if (res.status === 404 && allow404) return (await res.json()) as T;
       if (!res.ok) {
-        throw new LtcReplayError(`GET ${path} → HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
+        throw new LtcReplayError(
+          `GET ${path} → HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`,
+        );
       }
       return (await res.json()) as T;
     } finally {
@@ -124,6 +214,48 @@ export class LtcReplayClient {
   }
 
   /**
+   * Confirmation status for one transaction — the replacement for
+   * `getrawtransaction` against a pruned node, which cannot answer for a
+   * confirmed watch-only payment at all.
+   *
+   * Never treat `unknown` as "did not happen" without checking `indexedFrom`
+   * against the height you care about.
+   */
+  async txStatus(txid: string): Promise<TxStatus> {
+    return await this.getJson<TxStatus>(`/v1/tx/${encodeURIComponent(txid)}`, true);
+  }
+
+  /**
+   * Every payment the relay has seen to an address, split into confirmed and
+   * unconfirmed at `minConfirmations`.
+   *
+   *   const h = await client.addressHistory(addr, { minConfirmations: 6 });
+   *   for (const e of h.confirmed) credit(e.txid, e.vout, BigInt(e.valueSat));
+   *
+   * Two things to check before acting on the result. `coverage.lagBlocks` says
+   * how far behind the node the relay is — an empty list from a relay that has
+   * not caught up is not evidence of anything. And `truncated` says the totals
+   * describe the returned page rather than the address, so raise `limit`
+   * before reconciling a balance from them.
+   *
+   * Credits must be keyed on (txid, vout): the same entry is returned again on
+   * every poll, and returns once more with a block attached when it confirms.
+   */
+  async addressHistory(address: string, opts: AddressHistoryOptions = {}): Promise<AddressHistory> {
+    const q = new URLSearchParams();
+    if (opts.limit !== undefined) q.set("limit", String(opts.limit));
+    if (opts.minConfirmations !== undefined) {
+      q.set("minConfirmations", String(opts.minConfirmations));
+    }
+    if (opts.includeHex) q.set("includeHex", "true");
+
+    const query = q.size > 0 ? `?${q.toString()}` : "";
+    return await this.getJson<AddressHistory>(
+      `/v1/address/${encodeURIComponent(address)}${query}`,
+    );
+  }
+
+  /**
    * Yields every block after `sinceHeight`, in order, paging until it reaches
    * the node's tip.
    *
@@ -139,7 +271,9 @@ export class LtcReplayClient {
       const res = await fetch(url, { headers: this.headers() });
 
       if (!res.ok) {
-        throw new LtcReplayError(`replay → HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
+        throw new LtcReplayError(
+          `replay → HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`,
+        );
       }
       if (!res.body) throw new LtcReplayError("replay returned no body");
 
