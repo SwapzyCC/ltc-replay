@@ -12,6 +12,8 @@
  *                        `getrawtransaction`, which a pruned node cannot answer.
  *   /v1/address/:addr  — "What has paid this address?" Split into confirmed
  *                        and unconfirmed.
+ *   /v1/watch          — "Here is my address registry." The only write, and
+ *                        what decides how large the journal gets.
  *
  * This module owns only the wiring: the server, the auth gate, and the
  * top-level error boundary. Handlers live in ./routes.
@@ -30,6 +32,8 @@ const log = logger("http");
 
 /** Beyond this, a URL is a probe rather than a request. */
 const MAX_URL_LENGTH = 2_048;
+
+const ALLOWED_METHODS = new Set(["GET", "HEAD", "POST", "DELETE"]);
 
 export function createApi(deps: ApiDeps): Server {
   const authorised = makeAuthoriser(deps.cfg.authToken);
@@ -52,7 +56,7 @@ export function createApi(deps: ApiDeps): Server {
     const path = url.pathname.replace(/\/+$/, "") || "/";
     const method = req.method ?? "GET";
 
-    if (method !== "GET" && method !== "HEAD") return methodNotAllowed(res);
+    if (!ALLOWED_METHODS.has(method)) return methodNotAllowed(res);
 
     const route = resolve(deps, method, path, url, req, res);
 
@@ -62,7 +66,15 @@ export function createApi(deps: ApiDeps): Server {
     // Authentication is checked before the route is known to exist, so an
     // unauthenticated scan cannot use 404-vs-401 to map the API surface.
     if (!authorised(req)) return unauthorised(res);
-    if (!route) return notFound(res);
+
+    if (!route) {
+      // A POST to a path that exists but only reads is a method error, not a
+      // missing route — and 404 there would send a consumer looking for a
+      // typo in a URL that is perfectly correct. Asked of the same table that
+      // did the real dispatch, so the two can never disagree.
+      const asRead = method === "GET" ? null : resolve(deps, "GET", path, url, req, res);
+      return asRead ? methodNotAllowed(res) : notFound(res);
+    }
 
     await route.run();
   }

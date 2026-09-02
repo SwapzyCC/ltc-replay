@@ -5,7 +5,7 @@
  * content-type headers are decided once rather than per route.
  */
 
-import type { ServerResponse } from "node:http";
+import type { IncomingMessage, ServerResponse } from "node:http";
 
 export function json(res: ServerResponse, status: number, body: unknown): void {
   const payload = JSON.stringify(body);
@@ -81,4 +81,62 @@ export function boolParam(url: URL, key: string, fallback: boolean): boolean | n
   if (["1", "true", "yes", "on"].includes(v)) return true;
   if (["0", "false", "no", "off"].includes(v)) return false;
   return null;
+}
+
+/** Beyond this a request body is an attack, not a registry push. */
+const MAX_BODY_BYTES = 4 * 1024 * 1024;
+
+/**
+ * Reads and parses a JSON request body.
+ *
+ * Returns null and answers the request itself when the body is too large,
+ * unparseable, or not an object — so a caller can `if (body === null) return;`
+ * without repeating the same three error responses in every route.
+ *
+ * The size cap is enforced as bytes arrive rather than after buffering. A
+ * registry push is the one endpoint here that accepts bulk input, and the
+ * cheapest way to make a relay fall over would be to send it an unbounded one.
+ */
+export async function readJsonBody(
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<Record<string, unknown> | null> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+
+  try {
+    for await (const chunk of req) {
+      const buf = chunk as Buffer;
+      size += buf.length;
+      if (size > MAX_BODY_BYTES) {
+        json(res, 413, { error: "payload_too_large", limitBytes: MAX_BODY_BYTES });
+        req.destroy();
+        return null;
+      }
+      chunks.push(buf);
+    }
+  } catch {
+    badRequest(res, "request body could not be read");
+    return null;
+  }
+
+  if (size === 0) {
+    badRequest(res, "a JSON body is required");
+    return null;
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  } catch {
+    badRequest(res, "body is not valid JSON");
+    return null;
+  }
+
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    badRequest(res, "body must be a JSON object");
+    return null;
+  }
+
+  return parsed as Record<string, unknown>;
 }

@@ -1,11 +1,14 @@
 /**
  * Request dispatch.
  *
- * A table rather than a framework: the API is nine endpoints, all GET, and a
- * router dependency would be more code than the twenty lines it replaces —
- * plus a middleware chain to audit every time this service is reviewed.
+ * A table rather than a framework: the API is eleven endpoints, and a router
+ * dependency would be more code than the thirty lines it replaces — plus a
+ * middleware chain to audit every time this service is reviewed.
  *
  * Order matters only in that literal paths are matched before patterns.
+ *
+ * All but /v1/watch are reads. The watchlist is the one thing a consumer
+ * writes, because it is the one thing the chain cannot tell the relay.
  */
 
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -16,12 +19,14 @@ import { events } from "./routes/events.js";
 import { txStatus } from "./routes/tx.js";
 import { addressHistory } from "./routes/address.js";
 import { oneBlock, replay } from "./routes/blocks.js";
+import { listWatched, addWatched, removeWatched } from "./routes/watch.js";
 
 const BLOCK_PATH = /^\/v1\/block\/([0-9a-fA-F]{64})$/;
 const TX_PATH = /^\/v1\/tx\/([0-9a-fA-F]{64})$/;
 // Deliberately permissive: the address route validates the encoding itself and
 // answers 400 with a reason, which is more useful than a bare 404 from here.
 const ADDRESS_PATH = /^\/v1\/address\/([A-Za-z0-9]{25,90})$/;
+const WATCH_PATH = /^\/v1\/watch\/([A-Za-z0-9]{25,90})$/;
 
 export interface Dispatch {
   /** True when the route may be served without a bearer token. */
@@ -44,6 +49,16 @@ export function resolve(
   req: IncomingMessage,
   res: ServerResponse,
 ): Dispatch | null {
+  if (method === "POST" && path === "/v1/watch") {
+    return { isPublic: false, run: () => addWatched(deps, req, res) };
+  }
+
+  const unwatch = WATCH_PATH.exec(path);
+  if (method === "DELETE" && unwatch?.[1]) {
+    const value = unwatch[1];
+    return { isPublic: false, run: () => removeWatched(deps, value, res) };
+  }
+
   if (method !== "GET" && method !== "HEAD") return null;
 
   switch (path) {
@@ -57,6 +72,8 @@ export function resolve(
       return { isPublic: false, run: () => stats(deps, res) };
     case "/v1/replay":
       return { isPublic: false, run: () => replay(deps, url, req, res) };
+    case "/v1/watch":
+      return { isPublic: false, run: () => listWatched(deps, url, res) };
   }
 
   const block = BLOCK_PATH.exec(path);
@@ -88,6 +105,6 @@ export function notFound(res: ServerResponse): void {
 }
 
 export function methodNotAllowed(res: ServerResponse): void {
-  res.setHeader("allow", "GET, HEAD");
+  res.setHeader("allow", "GET, HEAD, POST, DELETE");
   json(res, 405, { error: "method_not_allowed" });
 }
