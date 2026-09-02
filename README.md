@@ -1,5 +1,13 @@
 # ltc-replay
 
+**Litecoin Core's ZMQ forgets. This remembers.**
+
+[![CI](https://github.com/BackStacked/ltc-replay/actions/workflows/ci.yml/badge.svg)](https://github.com/BackStacked/ltc-replay/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/BackStacked/ltc-replay/actions/workflows/codeql.yml/badge.svg)](https://github.com/BackStacked/ltc-replay/actions/workflows/codeql.yml)
+[![Licence: BSD-3-Clause](https://img.shields.io/badge/licence-BSD--3--Clause-blue.svg)](LICENSE)
+[![Node](https://img.shields.io/badge/node-%E2%89%A5%2020-5a9e4b.svg)](package.json)
+[![Pruned nodes](https://img.shields.io/badge/pruned%20nodes-supported-8a63d2.svg)](docs/pruned-nodes.md)
+
 A durable tap and replay service for a Litecoin Core node — including a
 **pruned** one.
 
@@ -114,7 +122,7 @@ tip that is not the chain tip.
 ## Quick start
 
 ```bash
-git clone <this repo> /opt/ltc-replay && cd /opt/ltc-replay
+git clone https://github.com/BackStacked/ltc-replay.git /opt/ltc-replay && cd /opt/ltc-replay
 npm ci && npm run build
 
 cp .env.example .env
@@ -233,15 +241,16 @@ The failure modes worth understanding before you wire this up are in
 
 ## Documentation
 
-| Document                                 | Read it when                                    |
-| ---------------------------------------- | ----------------------------------------------- |
-| [Pruned nodes](docs/pruned-nodes.md)     | Before anything else, if your node is pruned.   |
-| [Architecture](docs/architecture.md)     | You want to know how it works inside.           |
-| [Configuration](docs/configuration.md)   | Filling in `.env`.                              |
-| [Deployment](docs/deployment.md)         | Installing it on the node host.                 |
-| [API reference](docs/api.md)             | Writing a consumer.                             |
-| [Integration guide](docs/integration.md) | Wiring a wallet backend or deposit monitor.     |
-| [Operations](docs/operations.md)         | It is running and you need to keep it that way. |
+| Document                                 | Read it when                                       |
+| ---------------------------------------- | -------------------------------------------------- |
+| [Pruned nodes](docs/pruned-nodes.md)     | Before anything else, if your node is pruned.      |
+| [Architecture](docs/architecture.md)     | You want to know how it works inside.              |
+| [Configuration](docs/configuration.md)   | Filling in `.env`.                                 |
+| [Deployment](docs/deployment.md)         | Installing it on the node host.                    |
+| [API reference](docs/api.md)             | Writing a consumer.                                |
+| [Integration guide](docs/integration.md) | Wiring a wallet backend or deposit monitor.        |
+| [Operations](docs/operations.md)         | It is running and you need to keep it that way.    |
+| [TLS endpoints](docs/tls-endpoints.md)   | The node is behind TLS, or the relay runs off-box. |
 
 ## Layout
 
@@ -277,6 +286,25 @@ code in both directions at boot — a statement in the file with no caller, or a
 caller with no statement, is a startup failure rather than a route that throws
 later.
 
+## Contributing
+
+Bug reports, docs fixes and patches are welcome. [CONTRIBUTING.md](CONTRIBUTING.md)
+covers the setup (`npm ci && npm run check` — no node, no network, no database
+needed) and the few conventions that are not obvious from the code: SQL lives in
+`.sql` files and is validated in both directions at boot, security paths never
+fall back silently, and a money-correctness fix needs a test that fails without
+it.
+
+Participation is governed by the [Code of Conduct](CODE_OF_CONDUCT.md).
+
+## Security
+
+This service holds a node's RPC credentials and answers the question a wallet
+backend uses to decide whether to credit someone money. Vulnerabilities go
+through GitHub's private reporting, never a public issue —
+[SECURITY.md](SECURITY.md) has the scope, the non-scope, and what to include.
+
 ## Licence
 
-Unlicensed / private.
+[BSD 3-Clause](LICENSE). Use it, fork it, ship it; keep the notice, and do not
+use the author's name to endorse what you build with it.

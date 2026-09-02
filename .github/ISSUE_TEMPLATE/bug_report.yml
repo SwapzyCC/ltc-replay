@@ -1,0 +1,94 @@
+name: Bug report
+description: Something behaves differently from what the docs say
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **If this is a security issue, stop.** Use the Security tab →
+        *Report a vulnerability* instead. See [SECURITY.md](../blob/main/SECURITY.md).
+
+        **Never paste a real RPC password, bearer token, or a deposit address
+        you actually use.** Redact them. `rpc.example.dev` and the fixtures in
+        `.env.example` exist for this.
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: And what you expected instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      description: |
+        Steps, or a failing test against `test/`, which is worth more than any
+        description.
+      placeholder: |
+        1. Set LTC_ZMQ_TX_URL to ...
+        2. Start the service
+        3. GET /v1/stats shows ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: |
+        Relevant lines from `journalctl -u ltc-replay` or `docker compose logs`.
+        Redact hosts and credentials.
+      render: text
+
+  - type: textarea
+    id: stats
+    attributes:
+      label: "`GET /v1/stats` and `GET /v1/tip`"
+      description: |
+        Nearly every report is diagnosed from these two. `tap.txSeen` at zero
+        while the mempool is busy almost always means the ZMQ endpoints are
+        crossed — 28334 is `rawtx`, 28333 is `hashblock`.
+      render: json
+
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      placeholder: "v1.0.0, or the short SHA"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install
+    attributes:
+      label: How it runs
+      options:
+        - systemd on the node's host
+        - Docker, same host as the node
+        - Docker, different host from the node
+        - Development (npm run dev)
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: pruned
+    attributes:
+      label: Is the node pruned?
+      description: It changes which answers the node can give at all.
+      options:
+        - "Pruned"
+        - "Full node, no txindex"
+        - "Full node with txindex"
+        - "Not sure"
+    validations:
+      required: true
+
+  - type: input
+    id: env
+    attributes:
+      label: Node.js and OS
+      placeholder: "Node 22.11 on Debian 12"

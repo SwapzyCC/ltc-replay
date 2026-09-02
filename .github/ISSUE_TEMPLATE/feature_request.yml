@@ -1,0 +1,49 @@
+name: Feature request
+description: Propose a change to what the service does
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The service deliberately stays small: it journals what it sees, indexes
+        only registered addresses, and answers questions about them. Proposals
+        that keep it that shape land quickly. Proposals that turn it into a
+        wallet, an explorer, or a second node generally do not — that work
+        belongs in the consumer.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: |
+        What are you unable to do today? Describe the situation, not the
+        solution — the best proposals here have been reframed once the
+        underlying problem was clear.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you have in mind
+      description: New endpoint, new setting, changed behaviour.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What you tried instead
+      description: |
+        Including whether the consumer could do it. If the answer is "yes but
+        it is awkward", say why — that is often a good reason to move it here.
+
+  - type: checkboxes
+    id: impact
+    attributes:
+      label: Does this affect
+      options:
+        - label: The journal schema or its migration path
+        - label: What is stored per transaction (database size)
+        - label: An existing endpoint's response shape
+        - label: Anything a consumer uses to decide whether money arrived
