@@ -10,13 +10,16 @@ dependency-free TypeScript client — copy the file into the consuming service.
 
 ```mermaid
 flowchart LR
+  B["your backend"]
   R["ltc-replay"]
+
+  B -->|"POST /v1/watch"| R
 
   R -->|"ZMQ PUB :28340"| L["Live<br/>no code change"]
   R -->|"/v1/replay, /v1/events"| G["Gap recovery<br/>at boot"]
   R -->|"/v1/tx, /v1/address"| Q["Lookup<br/>did it confirm?"]
 
-  L --> B["your backend"]
+  L --> B
   G --> B
   Q --> B
 ```
@@ -24,6 +27,54 @@ flowchart LR
 Most integrations need all three. The live path gives latency, gap recovery
 gives completeness, and the lookup endpoints give the answer that a pruned node
 cannot.
+
+All three are downstream of the arrow going the other way: the relay stores a
+transaction only if it pays an address you have registered.
+
+---
+
+## 0. Register your addresses
+
+Do this first. With `WATCHLIST_ONLY=true` — the default — a relay with an empty
+watchlist stores nothing, and does it silently: no rows, no errors, and
+`/v1/stats` reporting a chain that looks quiet.
+
+**When an address is derived**, before it is shown to anyone:
+
+```ts
+await client.watch([address], { label: `user-${userId}` });
+```
+
+Registering before publishing is what makes rescans unnecessary. The filter only
+ever drops what arrived _before_ the address did, so an address that has never
+been shown to anyone cannot have been paid yet.
+
+**At boot, and on a timer**, re-assert the whole registry:
+
+```ts
+const all = await store.allLtcDepositAddresses(); // yours, not the relay's
+const added = await client.syncWatched(all);
+if (added > 0) log.warn(`relay was missing ${added} address(es) — re-pushed`);
+```
+
+This is not belt-and-braces. The watchlist is the **only** part of the relay's
+database that cannot be rebuilt from the chain: a reinstalled relay, or one
+whose journal was deleted to reclaim disk, comes back watching nothing. Because
+the consumer already holds the authoritative list, the cheapest fix is for it to
+push again — and `syncWatched` compares counts first, so the periodic call is
+one small `GET /v1/watch?limit=0` until the day it isn't.
+
+**If an address may already have been paid** — an import, a recovered wallet, a
+registry that drifted — ask for a bounded rescan:
+
+```ts
+await client.watch(imported, { rescanBlocks: 1000 });
+```
+
+Capped by the relay's `WATCH_RESCAN_MAX_BLOCKS` (default 2000); over the cap is
+rejected outright. Note that `/v1/replay` needs none of this — it reads the node
+rather than the index, so replaying from before the payment recovers it against
+the watchlist as it is _now_.
 
 ---
 

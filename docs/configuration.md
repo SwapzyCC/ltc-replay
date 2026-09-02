@@ -111,6 +111,41 @@ interval rarely does anything.
 the node's current tip; set it to backfill from a specific height. Note that on
 a pruned node nothing can walk below the node's `pruneheight`.
 
+## The watchlist
+
+| Variable                  | Required | Default | Notes                                                                |
+| ------------------------- | -------- | ------- | -------------------------------------------------------------------- |
+| `WATCHLIST_ONLY`          | no       | `true`  | Index only transactions paying a watched address.                    |
+| `WATCH_RESCAN_MAX_BLOCKS` | no       | `2000`  | Largest rescan one `POST /v1/watch` may ask for. 0 disables rescans. |
+
+This is the single largest lever on disk, and it is on by default. With it on,
+a transaction that pays nothing on the list is decoded, counted in
+`tap.txFiltered`, and dropped — not journalled, not indexed, not re-published.
+A deposit monitor watching a few thousand addresses discards upwards of 99.9%
+of chain traffic that way, and the sizing below stops being about Litecoin's
+transaction rate and starts being about your own deposit rate.
+
+Two consequences worth understanding before you deploy it:
+
+**An empty watchlist indexes nothing, and looks healthy doing it.** No rows, no
+errors, no logs — `/v1/stats` reports a quiet chain. The relay warns at boot and
+after the last removal, and `/v1/stats` carries `watchlist.count`; alert on
+`enabled: true` with `count: 0`.
+
+**The list is the one thing the chain cannot rebuild.** Every other byte in the
+journal can be reconstructed by re-walking blocks. This cannot, so the consumer
+owns it and re-pushes it — see the sync loop in
+[Integration](integration.md#0-register-your-addresses).
+
+Set `WATCHLIST_ONLY=false` to index every addressable output on the chain. That
+is the right setting for a block explorer or a relay serving consumers whose
+address set it cannot know, and the wrong one for a deposit monitor.
+
+`WATCH_RESCAN_MAX_BLOCKS` bounds the optional rescan on `POST /v1/watch`.
+Unbounded, it would be a way to make the relay walk the chain on request. Set it
+to `0` if you register every address before publishing it, which is the case
+where no rescan is ever needed.
+
 ## Indexes
 
 | Variable          | Required | Default | Notes                                       |
@@ -122,16 +157,18 @@ These two exist because Core will not run `txindex` alongside `prune`. Read
 [Pruned nodes](pruned-nodes.md) before choosing values — the defaults are
 reasonable, but the sizing question is a real one.
 
-| `TX_INDEX_BLOCKS` | Roughly    | Serves                           | Disk at 100k tx/day |
-| ----------------- | ---------- | -------------------------------- | ------------------- |
-| `0`               | —          | Nothing. `/v1/tx` always misses. | —                   |
-| `1440`            | 2.5 days   | Deposits only, nothing historic. | ~530 MB             |
-| `5760`            | 10 days    | Same-week disputes.              | ~1.7 GB             |
-| `20000`           | 5 weeks    | The default.                     | ~5.4 GB             |
-| `60000`           | 3.5 months | Long-tail reconciliation.        | ~16 GB              |
+| `TX_INDEX_BLOCKS` | Roughly    | Serves                           | Watchlist on, 1k/day | Watchlist off, 100k tx/day |
+| ----------------- | ---------- | -------------------------------- | -------------------- | -------------------------- |
+| `0`               | —          | Nothing. `/v1/tx` always misses. | —                    | —                          |
+| `1440`            | 2.5 days   | Deposits only, nothing historic. | ~5 MB                | ~530 MB                    |
+| `5760`            | 10 days    | Same-week disputes.              | ~15 MB               | ~1.7 GB                    |
+| `20000`           | 5 weeks    | The default.                     | ~50 MB               | ~5.4 GB                    |
+| `60000`           | 3.5 months | Long-tail reconciliation.        | ~155 MB              | ~16 GB                     |
 
-Disk scales linearly with both the window and your chain's transaction rate, and
-`ADDRESS_INDEX=false` cuts it to roughly a quarter. The arithmetic is in
+Disk scales linearly with the window and with the number of transactions that
+survive the filter — your deposit rate with `WATCHLIST_ONLY=true`, the whole
+chain's rate without it. `ADDRESS_INDEX=false` cuts what remains to roughly a
+quarter. The arithmetic is in
 [Operations](operations.md#what-actually-takes-the-space).
 
 `ADDRESS_INDEX=false` leaves `/v1/address` answering an empty history with

@@ -23,6 +23,8 @@ import type { AddressInfo } from "node:net";
 import type { Server } from "node:http";
 
 import { createApi } from "../src/http/server.js";
+import { Watchlist } from "../src/services/watchlist.js";
+import { Catchup } from "../src/services/catchup.js";
 import { Journal } from "../src/journal/index.js";
 import type { Config } from "../src/config/index.js";
 import type { LitecoinRpc } from "../src/chain/rpc.js";
@@ -60,6 +62,7 @@ const rpcStub = {
 const tapStub = {
   getStats: () => ({
     txSeen: 0,
+    txFiltered: 0,
     txJournalled: 0,
     blocksSeen: 0,
     coreGaps: 0,
@@ -89,8 +92,24 @@ before(async () => {
     txRetentionHours: 72,
     txIndexBlocks: 20_000,
     addressIndex: true,
+    // Filtering off, so these tests exercise the routes rather than the
+    // watchlist. Its own behaviour is covered in watchlist.test.ts.
+    watchlistOnly: false,
+    watchRescanMaxBlocks: 2_000,
   } as Config;
-  server = createApi({ cfg, journal, rpc: rpcStub, tap: tapStub, startedAt: Date.now() });
+
+  const watchlist = new Watchlist(journal, { enabled: cfg.watchlistOnly });
+  const catchup = new Catchup(cfg, journal, rpcStub, watchlist);
+
+  server = createApi({
+    cfg,
+    journal,
+    rpc: rpcStub,
+    tap: tapStub,
+    watchlist,
+    catchup,
+    startedAt: Date.now(),
+  });
 
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
