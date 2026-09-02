@@ -44,6 +44,11 @@ export const QUERY_NAMES = [
   "countAddressTxs",
   "getMeta",
   "setMeta",
+  "insertWatched",
+  "deleteWatched",
+  "allWatched",
+  "listWatched",
+  "countWatched",
 ] as const;
 
 export type QueryName = (typeof QUERY_NAMES)[number];

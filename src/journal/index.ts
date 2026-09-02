@@ -7,6 +7,7 @@
  */
 
 export { Journal } from "./journal.js";
+export type { WatchedInput } from "./journal.js";
 export type {
   AddressEntry,
   AddressPayment,
@@ -19,4 +20,5 @@ export type {
   MinedTx,
   ReorgEvent,
   TxEvent,
+  WatchedAddress,
 } from "./types.js";

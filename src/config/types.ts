@@ -26,6 +26,16 @@ export interface Config {
   txIndexBlocks: number;
   /** Whether to index which addresses each transaction paid. */
   addressIndex: boolean;
+  /**
+   * Index only transactions that pay a watched address.
+   *
+   * This is the difference between a database sized by your deposits and one
+   * sized by Litecoin. Off, the relay stores every addressable output on the
+   * chain.
+   */
+  watchlistOnly: boolean;
+  /** Largest rescan a single POST /v1/watch may ask for. 0 disables rescans. */
+  watchRescanMaxBlocks: number;
 
   catchupIntervalMs: number;
   /** First-run floor. Null means "start at the node's current tip". */

@@ -51,6 +51,15 @@ export function loadConfig(): Config {
     // transaction bodies, not just their ids — so it is switchable for
     // deployments that only ever replay blocks wholesale.
     addressIndex: bool("ADDRESS_INDEX", true),
+    // On by default, because the default deployment is a deposit monitor with
+    // a known address set. Indexing the whole chain to answer about a few
+    // thousand addresses costs gigabytes and buys nothing.
+    watchlistOnly: bool("WATCHLIST_ONLY", true),
+    // A rescan re-reads blocks from the node at full verbosity, so it is
+    // bounded rather than open-ended: an address registered before its deposit
+    // needs none, and an unbounded one would be a way to make the relay walk
+    // the whole chain on request.
+    watchRescanMaxBlocks: int("WATCH_RESCAN_MAX_BLOCKS", 2_000, 0, 100_000),
 
     catchupIntervalMs: int("CATCHUP_INTERVAL_MS", 60_000, 5_000, 3_600_000),
     startHeight: str("START_HEIGHT") === null ? null : int("START_HEIGHT", 0, 0, 100_000_000),

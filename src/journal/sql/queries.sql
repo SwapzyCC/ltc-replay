@@ -150,3 +150,27 @@ SELECT v FROM meta WHERE k = ?;
 -- name: setMeta
 INSERT INTO meta (k, v) VALUES (?, ?)
 ON CONFLICT(k) DO UPDATE SET v = excluded.v;
+
+-- ── Watchlist ───────────────────────────────────────────────────────────────
+
+-- name: insertWatched
+-- OR IGNORE: re-pushing the full registry is the documented way a consumer
+-- recovers from a rebuilt journal, so a repeat add is a no-op and keeps the
+-- original added_at rather than resetting it.
+INSERT OR IGNORE INTO watched_addresses (address, label, added_at, source)
+VALUES (?, ?, ?, ?);
+
+-- name: deleteWatched
+DELETE FROM watched_addresses WHERE address = ?;
+
+-- name: allWatched
+-- Read once at boot into the in-memory set the hot path checks. Every output
+-- of every transaction is tested against that set, so it cannot be a query.
+SELECT address FROM watched_addresses;
+
+-- name: listWatched
+SELECT address, label, added_at, source FROM watched_addresses
+ORDER BY added_at DESC, address ASC LIMIT ? OFFSET ?;
+
+-- name: countWatched
+SELECT COUNT(*) AS c FROM watched_addresses;
