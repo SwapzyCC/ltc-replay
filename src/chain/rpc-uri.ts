@@ -160,7 +160,8 @@ export function parseLtcRpcEndpoint(uri: string, label = "LTC RPC endpoint"): Lt
     );
   }
 
-  if (!hasUser) return { scheme: url.protocol === "https:" ? "https" : "http", host, port, basePath };
+  if (!hasUser)
+    return { scheme: url.protocol === "https:" ? "https" : "http", host, port, basePath };
 
   const username = decodeOrThrow(url.username, "username", label);
   const password = decodeOrThrow(url.password, "password", label);

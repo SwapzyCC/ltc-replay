@@ -18,10 +18,7 @@
  */
 
 import { Publisher } from "zeromq";
-import {
-  createLtcZmqSubscriber,
-  type LtcZmqSubscription,
-} from "../chain/zmq/index.js";
+import { createLtcZmqSubscriber, type LtcZmqSubscription } from "../chain/zmq/index.js";
 import type { Config } from "../config/index.js";
 import type { Journal, AddressPayment } from "../journal/index.js";
 import { logger, errMsg } from "../core/log.js";

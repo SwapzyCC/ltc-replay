@@ -10,11 +10,7 @@
 
 import { ConfigError } from "../core/errors.js";
 import { parseLtcZmqEndpoint, redactLtcZmqUri } from "../chain/zmq/index.js";
-import {
-  parseLtcRpcEndpoint,
-  resolveLtcRpcAuth,
-  rpcBaseUrl,
-} from "../chain/rpc-uri.js";
+import { parseLtcRpcEndpoint, resolveLtcRpcAuth, rpcBaseUrl } from "../chain/rpc-uri.js";
 
 /** A present, non-blank value, or null. */
 export function str(key: string): string | null {
@@ -120,12 +116,7 @@ export function rpcEndpoint(
     const endpoint = parseLtcRpcEndpoint(raw, key);
     resolved = {
       url: rpcBaseUrl(endpoint),
-      ...resolveLtcRpcAuth(
-        endpoint,
-        str("LTC_RPC_USER") ?? "",
-        str("LTC_RPC_PASSWORD") ?? "",
-        key,
-      ),
+      ...resolveLtcRpcAuth(endpoint, str("LTC_RPC_USER") ?? "", str("LTC_RPC_PASSWORD") ?? "", key),
     };
   } catch (err: unknown) {
     throw new ConfigError(err instanceof Error ? err.message : `${key} is not a valid endpoint`);

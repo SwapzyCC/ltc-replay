@@ -66,16 +66,13 @@ describe("LTC ZMQ URI parsing", () => {
   });
 
   it("parses tls with PLAIN credentials", () => {
-    assert.deepEqual(
-      parseLtcZmqEndpoint("tls://litecoinzmq:hunter2@zmq.backstacked.dev:28334"),
-      {
-        transport: "tls",
-        host: "zmq.backstacked.dev",
-        port: 28334,
-        username: "litecoinzmq",
-        password: "hunter2",
-      },
-    );
+    assert.deepEqual(parseLtcZmqEndpoint("tls://litecoinzmq:hunter2@zmq.backstacked.dev:28334"), {
+      transport: "tls",
+      host: "zmq.backstacked.dev",
+      port: 28334,
+      username: "litecoinzmq",
+      password: "hunter2",
+    });
   });
 
   it("decodes percent-encoded credentials", () => {
@@ -297,10 +294,21 @@ function makeCerts(): { dir: string; certs: Certs } | null {
     execFileSync(
       "openssl",
       [
-        "req", "-x509", "-newkey", "rsa:2048", "-nodes",
-        "-keyout", key, "-out", cert,
-        "-days", "1", "-subj", "/CN=localhost",
-        "-addext", "subjectAltName=DNS:localhost",
+        "req",
+        "-x509",
+        "-newkey",
+        "rsa:2048",
+        "-nodes",
+        "-keyout",
+        key,
+        "-out",
+        cert,
+        "-days",
+        "1",
+        "-subj",
+        "/CN=localhost",
+        "-addext",
+        "subjectAltName=DNS:localhost",
       ],
       { stdio: "ignore" },
     );
@@ -460,7 +468,10 @@ async function firstFrame(
   try {
     const iterator = sub[Symbol.asyncIterator]();
     const timer = new Promise<never>((_resolve, reject) => {
-      setTimeout(() => reject(new Error("timed out waiting for a frame")), Math.max(0, deadline - Date.now())).unref();
+      setTimeout(
+        () => reject(new Error("timed out waiting for a frame")),
+        Math.max(0, deadline - Date.now()),
+      ).unref();
     });
     const result = await Promise.race([iterator.next(), timer]);
     if (result.done === true || result.value === undefined) {
