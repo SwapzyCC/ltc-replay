@@ -64,6 +64,14 @@ export function stats(deps: ApiDeps, res: ServerResponse): void {
       txIndexBlocks: deps.cfg.txIndexBlocks,
       addressIndex: deps.cfg.addressIndex,
     },
+    // Read these together: filtering on with an empty list means the relay is
+    // indexing nothing at all, which every other counter here would report as
+    // a perfectly healthy quiet chain.
+    watchlist: {
+      enabled: deps.watchlist.enabled,
+      count: deps.watchlist.size,
+      rescanning: deps.catchup.isRescanning,
+    },
     startedAt: deps.startedAt,
   });
 }

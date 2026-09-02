@@ -8,6 +8,9 @@
  * Boot order matters and is not arbitrary:
  *
  *   1. journal   — open the store before anything can want to write to it.
+ *   1b. watchlist — loaded from the journal, because every writer below it
+ *                  consults the list to decide whether a transaction is worth
+ *                  storing at all.
  *   2. preflight — refuse to start against a node still in initial sync;
  *                  report, but tolerate, a pruned one.
  *   3. tap       — subscribe *before* catching up, so nothing published during
@@ -29,6 +32,7 @@ import { Journal } from "./journal/index.js";
 import { LitecoinRpc } from "./chain/rpc.js";
 import { Tap } from "./services/tap.js";
 import { Catchup } from "./services/catchup.js";
+import { Watchlist } from "./services/watchlist.js";
 import { createApi } from "./http/server.js";
 import { logger, errMsg } from "./core/log.js";
 
@@ -43,6 +47,7 @@ const SHUTDOWN_GRACE_MS = 10_000;
 export class App {
   private readonly journal: Journal;
   private readonly rpc: LitecoinRpc;
+  private readonly watchlist: Watchlist;
   private readonly catchup: Catchup;
   private readonly tap: Tap;
   private readonly startedAt = Date.now();
@@ -55,8 +60,11 @@ export class App {
   constructor(private readonly cfg: Config) {
     this.journal = new Journal(cfg.dbPath);
     this.rpc = new LitecoinRpc(cfg);
-    this.catchup = new Catchup(cfg, this.journal, this.rpc);
-    this.tap = new Tap(cfg, this.journal);
+    // One instance, shared: the tap, catch-up and the API must agree on what is
+    // watched, and two copies of the set would drift the moment one is updated.
+    this.watchlist = new Watchlist(this.journal, { enabled: cfg.watchlistOnly });
+    this.catchup = new Catchup(cfg, this.journal, this.rpc, this.watchlist);
+    this.tap = new Tap(cfg, this.journal, this.watchlist);
   }
 
   async start(): Promise<void> {
@@ -95,6 +103,8 @@ export class App {
       journal: this.journal,
       rpc: this.rpc,
       tap: this.tap,
+      watchlist: this.watchlist,
+      catchup: this.catchup,
       startedAt: this.startedAt,
     });
 
@@ -120,6 +130,17 @@ export class App {
         `${stats.indexedTxs} indexed transaction(s) from height ` +
         `${stats.indexFloorHeight ?? "—"}; cursor at seq ${this.journal.tipSeq()}`,
     );
+
+    // Repeated at the end of boot on purpose. The warning from the Watchlist
+    // constructor is thousands of lines of catch-up logging ago by now, and
+    // "the relay is up and storing nothing" is the one state an operator must
+    // not have to scroll to find.
+    if (this.cfg.watchlistOnly && this.watchlist.size === 0) {
+      log.warn(
+        "the watchlist is empty — no transaction can match it, so nothing will be " +
+          "indexed or re-published. Push the consumer's addresses to POST /v1/watch.",
+      );
+    }
   }
 
   private prune(): void {
