@@ -20,9 +20,10 @@
  */
 
 import type { Config } from "../config/index.js";
-import type { Journal } from "../journal/index.js";
+import type { AddressPayment, Journal } from "../journal/index.js";
 import { LitecoinRpc } from "../chain/rpc.js";
 import { extractPayments } from "../chain/payments.js";
+import type { Watchlist } from "./watchlist.js";
 import { logger, errMsg } from "../core/log.js";
 
 const log = logger("catchup");
@@ -47,6 +48,7 @@ export interface CatchupResult {
 export class Catchup {
   private running = false;
   private queued = false;
+  private rescanning = false;
 
   /**
    * Lowest height the node can still serve full block data for, or null on an
@@ -59,6 +61,7 @@ export class Catchup {
     private readonly cfg: Config,
     private readonly journal: Journal,
     private readonly rpc: LitecoinRpc,
+    private readonly watchlist: Watchlist,
   ) {}
 
   /**
@@ -83,6 +86,13 @@ export class Catchup {
     const indexes = await this.rpc.getIndexNames();
 
     log.info(`node ready — chain ${info.chain}, height ${info.blocks}`);
+
+    if (this.watchlist.enabled) {
+      log.info(
+        `watchlist filtering is on: only transactions paying one of ` +
+          `${this.watchlist.size} watched address(es) are indexed`,
+      );
+    }
 
     if (this.pruneFloor !== null) {
       const depth = info.blocks - this.pruneFloor;
@@ -213,40 +223,96 @@ export class Catchup {
    * that answers what is switched on.
    *
    * Verbosity 1 returns txids only; verbosity 2 returns every transaction's
-   * full serialisation, which is a great deal more data and only worth
-   * fetching when the addresses inside it are actually being indexed.
+   * full serialisation. The cheap read is only available when neither the
+   * address index nor the watchlist needs to look inside the transactions —
+   * deciding whether a transaction pays a watched address means decoding its
+   * outputs, and Core will not do that filtering for us.
+   *
+   * With the watchlist on, a transaction that pays nothing we watch produces
+   * no rows at all: not in `address_txs`, and not in `block_txs` either. The
+   * confirmation index exists to answer "did this deposit confirm?", and a
+   * transaction that is not a deposit is never the subject of that question.
    */
   private async indexBlock(height: number, hash: string): Promise<void> {
-    if (this.cfg.addressIndex) {
-      const block = await this.rpc.getBlockWithTxs(hash);
+    const needsBodies = this.cfg.addressIndex || this.watchlist.enabled;
 
+    if (!needsBodies) {
       if (this.cfg.txIndexBlocks > 0) {
-        this.journal.indexBlockTxs(
-          height,
-          hash,
-          block.tx.map((t) => t.txid),
-        );
-      }
-
-      const ts = block.time * 1_000;
-      for (const tx of block.tx) {
-        try {
-          const { txid, payments } = extractPayments(Buffer.from(tx.hex, "hex"));
-          this.journal.indexAddressPayments(txid, payments, ts);
-        } catch (err: unknown) {
-          // One unparseable transaction must not abandon the block: the rest
-          // of it still carries deposits, and stopping here would leave the
-          // block half-indexed but still about to be marked done.
-          log.warn(`skipping undecodable tx ${tx.txid} in block ${height}`, errMsg(err));
-        }
+        const block = await this.rpc.getBlockTxids(hash);
+        this.journal.indexBlockTxs(height, hash, block.tx);
       }
       return;
     }
 
-    if (this.cfg.txIndexBlocks > 0) {
-      const block = await this.rpc.getBlockTxids(hash);
-      this.journal.indexBlockTxs(height, hash, block.tx);
+    const block = await this.rpc.getBlockWithTxs(hash);
+    const ts = block.time * 1_000;
+    const keep: string[] = [];
+
+    for (const tx of block.tx) {
+      let txid: string;
+      let mine: readonly AddressPayment[];
+      try {
+        const extracted = extractPayments(Buffer.from(tx.hex, "hex"));
+        txid = extracted.txid;
+        mine = this.watchlist.filter(extracted.payments);
+      } catch (err: unknown) {
+        // One unparseable transaction must not abandon the block: the rest of
+        // it still carries deposits, and stopping here would leave the block
+        // half-indexed but still about to be marked done. It is kept in the
+        // transaction index — it cannot be excluded on evidence we failed to
+        // read — so a lookup for it still resolves.
+        log.warn(`skipping undecodable tx ${tx.txid} in block ${height}`, errMsg(err));
+        keep.push(tx.txid);
+        continue;
+      }
+
+      if (mine.length === 0) continue;
+
+      keep.push(txid);
+      if (this.cfg.addressIndex) this.journal.indexAddressPayments(txid, mine, ts);
     }
+
+    if (this.cfg.txIndexBlocks > 0 && keep.length > 0) {
+      this.journal.indexBlockTxs(height, hash, keep);
+    }
+  }
+
+  /**
+   * Re-indexes a range of blocks against the current watchlist.
+   *
+   * Needed because the watchlist filters at write time: an address added after
+   * a payment landed has no rows for it, and nothing in the normal flow will
+   * ever go back for them. Registering the address before publishing it to a
+   * user — the ordinary case — needs none of this. A rescan is for the ones
+   * that arrive out of order: an import, a recovered wallet, a registry that
+   * was out of sync.
+   *
+   * Bounded by WATCH_RESCAN_MAX_BLOCKS and by the node's prune floor, and it
+   * collapses with a catch-up pass rather than running alongside one: both
+   * write the same tables, and a rescan racing a pass would have them fighting
+   * over the same block.
+   */
+  async rescan(fromHeight: number, toHeight: number): Promise<number> {
+    if (this.rescanning) throw new Error("a rescan is already running");
+    this.rescanning = true;
+    try {
+      const from = this.clampToPruneFloor(Math.max(0, fromHeight), "rescan");
+      let done = 0;
+      for (let h = from; h <= toHeight; h++) {
+        const hash = await this.rpc.getBlockHash(h);
+        await this.indexBlock(h, hash);
+        done += 1;
+      }
+      log.info(`rescan indexed ${done} block(s) from ${from} to ${toHeight}`);
+      return done;
+    } finally {
+      this.rescanning = false;
+    }
+  }
+
+  /** True while a rescan is in flight, so a second request is refused. */
+  get isRescanning(): boolean {
+    return this.rescanning;
   }
 
   /**
