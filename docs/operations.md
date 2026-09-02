@@ -79,19 +79,47 @@ curl -sH "Authorization: Bearer $AUTH_TOKEN" localhost:28350/v1/stats \
   | jq '.journal | {events, txs, blocks, indexedTxs, indexedOutputs, sizeBytes}'
 ```
 
-Rough shape of what is stored:
+### What actually takes the space
 
-| Component           | Size                                          |
-| ------------------- | --------------------------------------------- |
-| Block events        | A few dozen bytes each, ~576/day. Permanent.  |
-| Mempool `tx` events | Full raw transaction. The bulk, until pruned. |
-| `block_txs`         | One row per transaction per block.            |
-| `address_txs`       | One row per decoded output.                   |
+Not the event log. The two indexes, by roughly an order of magnitude — and
+`address_txs` is the larger of the two, because it holds a row for **every
+addressable output on the chain**, not only the addresses you watch.
 
-The two indexes dominate a steady-state deployment. At the default
-`TX_INDEX_BLOCKS=20000` with `ADDRESS_INDEX=true`, expect the low hundreds of
-megabytes on mainnet — check `sizeBytes` against your own node rather than
-trusting the estimate.
+Per row, including the secondary indexes each table carries:
+
+| Component          | Rows                          | Bytes/row (incl. indexes) |
+| ------------------ | ----------------------------- | ------------------------- |
+| `block_txs`        | one per transaction per block | ~340                      |
+| `address_txs`      | one per addressable output    | ~505                      |
+| `events` (`tx`)    | one per mempool sighting      | ~520                      |
+| `events` (`block`) | 576/day, permanent            | ~110                      |
+
+At ~2.3 addressable outputs per transaction that is **~1.5 KB per transaction**
+held inside the index window, and the window is `TX_INDEX_BLOCKS / 576` days.
+
+```
+index bytes   = tx_per_day * (TX_INDEX_BLOCKS / 576) * 1.5 KB
+mempool bytes = tx_per_day * (TX_RETENTION_HOURS / 24) * 0.52 KB
+```
+
+Litecoin runs roughly 576 blocks a day; take your own transaction rate from
+`getchaintxstats`. At 100k transactions/day:
+
+| Settings                                      | Steady state |
+| --------------------------------------------- | ------------ |
+| `TX_INDEX_BLOCKS=20000`, address index on     | **~5.4 GB**  |
+| `TX_INDEX_BLOCKS=20000`, address index off    | ~1.3 GB      |
+| `TX_INDEX_BLOCKS=5760`, address index on      | ~1.7 GB      |
+| `TX_INDEX_BLOCKS=1440` (2.5 days), address on | ~530 MB      |
+
+Halve those at 50k tx/day, double them at 200k. Add ~15% for the WAL and for
+free pages SQLite does not hand back to the filesystem. Treat the whole table as
+an estimate: `sizeBytes` from `/v1/stats` is the only number that is actually
+true about your deployment.
+
+Growth is bounded rather than open-ended. `address_txs` rows whose transaction
+has dropped out of `block_txs` are removed on the same pass, so both indexes
+settle at the window instead of accumulating.
 
 Levers, in the order worth pulling:
 

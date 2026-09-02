@@ -122,12 +122,17 @@ These two exist because Core will not run `txindex` alongside `prune`. Read
 [Pruned nodes](pruned-nodes.md) before choosing values — the defaults are
 reasonable, but the sizing question is a real one.
 
-| `TX_INDEX_BLOCKS` | Roughly    | Serves                           |
-| ----------------- | ---------- | -------------------------------- |
-| `0`               | —          | Nothing. `/v1/tx` always misses. |
-| `5760`            | 10 days    | Same-week disputes.              |
-| `20000`           | 5 weeks    | The default.                     |
-| `60000`           | 3.5 months | Long-tail reconciliation.        |
+| `TX_INDEX_BLOCKS` | Roughly    | Serves                           | Disk at 100k tx/day |
+| ----------------- | ---------- | -------------------------------- | ------------------- |
+| `0`               | —          | Nothing. `/v1/tx` always misses. | —                   |
+| `1440`            | 2.5 days   | Deposits only, nothing historic. | ~530 MB             |
+| `5760`            | 10 days    | Same-week disputes.              | ~1.7 GB             |
+| `20000`           | 5 weeks    | The default.                     | ~5.4 GB             |
+| `60000`           | 3.5 months | Long-tail reconciliation.        | ~16 GB              |
+
+Disk scales linearly with both the window and your chain's transaction rate, and
+`ADDRESS_INDEX=false` cuts it to roughly a quarter. The arithmetic is in
+[Operations](operations.md#what-actually-takes-the-space).
 
 `ADDRESS_INDEX=false` leaves `/v1/address` answering an empty history with
 `coverage.addressIndexEnabled: false` rather than erroring — so a consumer can
