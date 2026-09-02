@@ -1,35 +1,85 @@
-# Append to litecoin.conf, then restart litecoind.
+# litecoin.conf — what ltc-replay needs from the node.
 #
-# The relay runs on this same machine, so every endpoint stays on loopback.
-# Nothing here needs to be reachable from outside the box.
+# Merge these into your existing litecoin.conf and restart litecoind. The relay
+# runs on the same machine as the node, so every endpoint below stays on
+# loopback; nothing here needs to be reachable from outside the box.
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# If your node is pruned, read this first.
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# `prune` and `txindex` are mutually exclusive in Core. A node started with
+# both refuses to start at all:
+#
+#     Error: Prune mode is incompatible with -txindex.
+#
+# There is no flag that reconciles them. The consequence is concrete and it is
+# the reason this project exists: without txindex, `getrawtransaction <txid>`
+# can only answer for transactions in the mempool or owned by a loaded wallet.
+# For a confirmed, watch-only deposit it returns
+#
+#     -5: No such mempool transaction. Use -txindex ... to enable blockchain
+#         transaction queries.
+#
+# — that is, the node stops being able to confirm the deposit at precisely the
+# moment the deposit confirms. A backend that reads "not found" as "not real"
+# will drop it.
+#
+# So: leave `prune` exactly as it is. Do not add txindex, and do not reindex.
+# The relay keeps its own txid → block index and its own address index from the
+# blocks it walks, and serves them on /v1/tx and /v1/address. Set
+# TX_INDEX_BLOCKS in the relay's .env deep enough to cover the oldest deposit
+# you would ever need to answer for.
+#
+# One real limit remains, and it is worth knowing: the relay indexes from the
+# height it first ran (or START_HEIGHT). Blocks the node has already discarded
+# under `prune` cannot be walked by anything, relay included. `getblockchaininfo`
+# reports the floor as `pruneheight`, and /v1/tx and /v1/address report their own
+# as `indexedFrom`.
 
-# ── Required: the transaction index ──────────────────────────────────────────
-# Replay resolves transactions that belong to no loaded wallet. Without
-# txindex, getrawtransaction answers "No such mempool transaction" for any
-# confirmed transaction the wallet does not own, and the relay refuses to
-# start rather than serve an incomplete history.
-#
-# Setting this on an existing node requires a one-time reindex:
-#   litecoind -reindex
-# Budget a few hours and roughly 40 GB of extra disk.
-txindex=1
 
 # ── ZMQ publishers ───────────────────────────────────────────────────────────
-zmqpubrawtx=tcp://127.0.0.1:28332
+# The relay subscribes to two topics. `rawtx` carries the serialised
+# transaction, which is what makes a deposit decodable the moment it hits the
+# mempool; `hashblock` is the wake-up that triggers catch-up.
+#
+# rawtx and hashtx are different publishers and need different ports. If you
+# already run hashtx on 28332, leave it — just make sure LTC_ZMQ_TX_URL in the
+# relay's .env points at the *rawtx* port, not that one. Pointing it at hashtx
+# delivers 32-byte hashes where the tap expects transactions, and it decodes
+# nothing while looking perfectly healthy.
+zmqpubrawtx=tcp://127.0.0.1:28334
 zmqpubhashblock=tcp://127.0.0.1:28333
 
-# High-water marks. When the queue for a topic fills, Core drops frames
-# silently — the relay detects this from the per-topic sequence counter and
-# logs it, but not losing them in the first place is better. The defaults
-# (1000) are low for a busy mempool.
+# High-water marks. When a topic's queue fills, Core drops frames silently.
+# The relay notices — Core's per-topic sequence counter jumps, and the tap logs
+# the gap and lets catch-up repair it from blocks — but not dropping them in
+# the first place is better. Core's default of 1000 is low for a busy mempool
+# and for the burst that follows a new block.
 zmqpubrawtxhwm=50000
 zmqpubhashblockhwm=10000
 
+# If you also publish hashtx / rawblock / sequence for other consumers, they
+# cost nothing and the relay ignores them. Bind them to loopback too.
+
 # ── RPC ──────────────────────────────────────────────────────────────────────
-# Used for catch-up and for serving block contents. Loopback only.
+# Used for catch-up, for block contents on /v1/replay, and for confirmation
+# counts. Read methods only.
 server=1
 rpcbind=127.0.0.1
 rpcallowip=127.0.0.1
-# Prefer rpcauth over a plaintext rpcpassword. Generate with the
-# rpcauth.py helper shipped with Core:
+
+# Prefer rpcauth over a plaintext rpcpassword. Generate with the rpcauth.py
+# helper shipped with Core; it prints the line to paste here and the password
+# to put in the relay's .env, and the password itself is never stored on the
+# node:
 #   rpcauth=ltcreplay:<salt>$<hash>
+
+# ── A note on binding ────────────────────────────────────────────────────────
+# If your config currently has `rpcbind=0.0.0.0` or ZMQ publishers on
+# `tcp://0.0.0.0:...`, narrow them. Core's RPC port with `rpcbind=0.0.0.0` and
+# no matching `rpcallowip` listens on every interface, and ZMQ PUB has no
+# authentication of any kind — anyone who can reach the port gets the live
+# feed. Loopback is enough for the relay, which runs on the same host; if some
+# other consumer genuinely needs them, bind to the private interface and
+# firewall the port to that consumer's address.
