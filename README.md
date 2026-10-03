@@ -2,8 +2,8 @@
 
 **Litecoin Core's ZMQ forgets. This remembers.**
 
-[![CI](https://github.com/BackStacked/ltc-replay/actions/workflows/ci.yml/badge.svg)](https://github.com/BackStacked/ltc-replay/actions/workflows/ci.yml)
-[![CodeQL](https://github.com/BackStacked/ltc-replay/actions/workflows/codeql.yml/badge.svg)](https://github.com/BackStacked/ltc-replay/actions/workflows/codeql.yml)
+[![CI](https://github.com/SwapzyCC/ltc-replay/actions/workflows/ci.yml/badge.svg)](https://github.com/SwapzyCC/ltc-replay/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/SwapzyCC/ltc-replay/actions/workflows/codeql.yml/badge.svg)](https://github.com/SwapzyCC/ltc-replay/actions/workflows/codeql.yml)
 [![Licence: BSD-3-Clause](https://img.shields.io/badge/licence-BSD--3--Clause-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%E2%89%A5%2020-5a9e4b.svg)](package.json)
 [![Pruned nodes](https://img.shields.io/badge/pruned%20nodes-supported-8a63d2.svg)](docs/pruned-nodes.md)
@@ -122,7 +122,7 @@ tip that is not the chain tip.
 ## Quick start
 
 ```bash
-git clone https://github.com/BackStacked/ltc-replay.git /opt/ltc-replay && cd /opt/ltc-replay
+git clone https://github.com/SwapzyCC/ltc-replay.git /opt/ltc-replay && cd /opt/ltc-replay
 npm ci && npm run build
 
 cp .env.example .env

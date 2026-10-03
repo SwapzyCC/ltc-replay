@@ -8,7 +8,7 @@ Found a security issue? Do not open an issue — see [SECURITY.md](SECURITY.md).
 ## Getting set up
 
 ```bash
-git clone https://github.com/BackStacked/ltc-replay.git
+git clone https://github.com/SwapzyCC/ltc-replay.git
 cd ltc-replay
 npm ci
 npm run check    # lint + typecheck + test
