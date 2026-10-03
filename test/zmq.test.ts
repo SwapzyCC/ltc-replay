@@ -66,9 +66,9 @@ describe("LTC ZMQ URI parsing", () => {
   });
 
   it("parses tls with PLAIN credentials", () => {
-    assert.deepEqual(parseLtcZmqEndpoint("tls://litecoinzmq:hunter2@zmq.backstacked.dev:28334"), {
+    assert.deepEqual(parseLtcZmqEndpoint("tls://litecoinzmq:hunter2@zmq.example.dev:28334"), {
       transport: "tls",
-      host: "zmq.backstacked.dev",
+      host: "zmq.example.dev",
       port: 28334,
       username: "litecoinzmq",
       password: "hunter2",
@@ -83,7 +83,7 @@ describe("LTC ZMQ URI parsing", () => {
   });
 
   it("round-trips a password full of delimiters", () => {
-    const ep = parseLtcZmqEndpoint(`tls://litecoinzmq:${ENCODED}@zmq.backstacked.dev:28334`);
+    const ep = parseLtcZmqEndpoint(`tls://litecoinzmq:${ENCODED}@zmq.example.dev:28334`);
     assert.equal(ep.password, SECRET);
   });
 
@@ -157,11 +157,11 @@ describe("LTC ZMQ URI rejection", () => {
 });
 
 describe("LTC ZMQ redaction", () => {
-  const uri = `tls://litecoinzmq:${ENCODED}@zmq.backstacked.dev:28334`;
+  const uri = `tls://litecoinzmq:${ENCODED}@zmq.example.dev:28334`;
 
   it("masks the password but keeps everything an operator needs", () => {
     const shown = redactLtcZmqEndpoint(parseLtcZmqEndpoint(uri));
-    assert.equal(shown, "tls://litecoinzmq:********@zmq.backstacked.dev:28334");
+    assert.equal(shown, "tls://litecoinzmq:********@zmq.example.dev:28334");
   });
 
   it("leaks nothing from a parsed endpoint", () => {
