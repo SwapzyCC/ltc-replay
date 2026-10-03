@@ -273,22 +273,22 @@ test("the watchlist routes are closed to an unauthenticated caller", async () =>
   for (const res of await Promise.all(calls)) assert.equal(res.status, 401);
 });
 
-test("POST registers an address and reports what was new", async () => {
-  const post = async (body: unknown): Promise<Record<string, unknown>> => {
-    const res = await fetch(`${base}/v1/watch`, {
-      method: "POST",
-      headers: { ...auth, "content-type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    assert.equal(res.status, 200);
-    return (await res.json()) as Record<string, unknown>;
-  };
+async function postWatch(body: unknown): Promise<Record<string, unknown>> {
+  const res = await fetch(`${base}/v1/watch`, {
+    method: "POST",
+    headers: { ...auth, "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  assert.equal(res.status, 200);
+  return (await res.json()) as Record<string, unknown>;
+}
 
-  const first = await post({ addresses: [OURS.address], label: "deposit" });
+test("POST registers an address and reports what was new", async () => {
+  const first = await postWatch({ addresses: [OURS.address], label: "deposit" });
   assert.equal(first["added"], 1);
   assert.equal(first["alreadyWatched"], 0);
 
-  const again = await post({ addresses: [OURS.address, OURS.address] });
+  const again = await postWatch({ addresses: [OURS.address, OURS.address] });
   assert.equal(again["requested"], 1, "duplicates within one request collapse");
   assert.equal(again["added"], 0);
   assert.equal(again["alreadyWatched"], 1);

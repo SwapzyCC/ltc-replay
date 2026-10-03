@@ -78,5 +78,5 @@ First public release.
 - Deployment for systemd and Docker, a `litecoin.conf` snippet, and eight
   documents under `docs/`.
 
-[unreleased]: https://github.com/BackStacked/ltc-replay/compare/v1.0.0...HEAD
-[1.0.0]: https://github.com/BackStacked/ltc-replay/releases/tag/v1.0.0
+[unreleased]: https://github.com/SwapzyCC/ltc-replay/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/SwapzyCC/ltc-replay/releases/tag/v1.0.0

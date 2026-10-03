@@ -20,7 +20,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node: ["20", "22", "24"]
+        node: ["22", "24"]
 
     steps:
       - uses: actions/checkout@v4
@@ -81,11 +81,13 @@ jobs:
 
       # Boot far enough to prove the image is wired up. There is no node to
       # talk to, so config validation is what we are exercising: the process
-      # must reject a missing AUTH_TOKEN rather than start without one.
+      # must reject a missing AUTH_TOKEN rather than start without one. The RPC
+      # URL carries throwaway credentials because a URL without any is rejected
+      # first, which would pass the exit-code check for the wrong reason.
       - name: refuses to start without a token
         run: |
           set +e
-          out=$(docker run --rm -e LTC_RPC_URL=http://127.0.0.1:9332 ltc-replay:ci 2>&1)
+          out=$(docker run --rm -e LTC_RPC_URL=http://ci:ci@127.0.0.1:9332 ltc-replay:ci 2>&1)
           code=$?
           echo "$out"
           test $code -ne 0 || { echo "started with no AUTH_TOKEN"; exit 1; }

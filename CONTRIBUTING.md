@@ -8,7 +8,7 @@ Found a security issue? Do not open an issue — see [SECURITY.md](SECURITY.md).
 ## Getting set up
 
 ```bash
-git clone https://github.com/BackStacked/ltc-replay.git
+git clone https://github.com/SwapzyCC/ltc-replay.git
 cd ltc-replay
 npm ci
 npm run check    # lint + typecheck + test
@@ -20,7 +20,7 @@ it fixtures. If a change makes the suite need a live node, the change is wrong;
 put the node-dependent part behind an interface and fake it, the way
 `test/api.test.ts` fakes `LitecoinRpc`.
 
-Node 20 or newer. `better-sqlite3` and `zeromq` are native, so a first install
+Node 22 or newer. `better-sqlite3` and `zeromq` are native, so a first install
 may compile them — that is normal and only happens once.
 
 To run it for real you need a node; `.env.example` and
@@ -35,7 +35,7 @@ npm run check
 npm run format
 ```
 
-CI runs the same thing on Node 20, 22 and 24, plus a Docker build. A PR that
+CI runs the same thing on Node 22 and 24, plus a Docker build. A PR that
 fails `npm run check` locally will fail there too.
 
 Lint is [oxlint](https://oxc.rs), not ESLint — typescript-eslint has no peer
