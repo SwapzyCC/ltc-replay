@@ -5,7 +5,7 @@
 [![CI](https://github.com/SwapzyCC/ltc-replay/actions/workflows/ci.yml/badge.svg)](https://github.com/SwapzyCC/ltc-replay/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/SwapzyCC/ltc-replay/actions/workflows/codeql.yml/badge.svg)](https://github.com/SwapzyCC/ltc-replay/actions/workflows/codeql.yml)
 [![Licence: BSD-3-Clause](https://img.shields.io/badge/licence-BSD--3--Clause-blue.svg)](LICENSE)
-[![Node](https://img.shields.io/badge/node-%E2%89%A5%2020-5a9e4b.svg)](package.json)
+[![Node](https://img.shields.io/badge/node-%E2%89%A5%2022-5a9e4b.svg)](package.json)
 [![Pruned nodes](https://img.shields.io/badge/pruned%20nodes-supported-8a63d2.svg)](docs/pruned-nodes.md)
 
 A durable tap and replay service for a Litecoin Core node — including a
