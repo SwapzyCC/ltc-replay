@@ -109,7 +109,7 @@ the node being up, and it replicates nothing.
 
 ## Requirements
 
-- Node.js ≥ 20
+- Node.js ≥ 22
 - Litecoin Core with ZMQ enabled — see
   [`deploy/litecoin.conf.snippet`](deploy/litecoin.conf.snippet)
 
