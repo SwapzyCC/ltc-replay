@@ -47,10 +47,10 @@
   },
   "devDependencies": {
     "@types/better-sqlite3": "^9.6.0",
-    "@types/node": "^26.4.0",
-    "oxlint": "^1.81.0",
-    "prettier": "^3.9.6",
-    "tsx": "^4.23.13",
+    "@types/node": "^26.6.3",
+    "oxlint": "^1.86.0",
+    "prettier": "^3.9.9",
+    "tsx": "^4.23.15",
     "typescript": "^7.0.2"
   }
 }
