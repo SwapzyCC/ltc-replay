@@ -141,6 +141,18 @@ cp .env.example .env && $EDITOR .env
 docker compose up -d --build
 ```
 
+Or pull the published image instead of building it, from
+[GHCR](https://github.com/SwapzyCC/ltc-replay/pkgs/container/ltc-replay):
+
+```bash
+docker pull ghcr.io/swapzycc/ltc-replay:1
+```
+
+To run it with the compose file, replace the `build:` block and the
+`image:` line with `image: ghcr.io/swapzycc/ltc-replay:1`, then
+`docker compose up -d`. Every version tag publishes amd64 and arm64
+images, tagged with the full version, `major.minor`, `major` and `latest`.
+
 Full instructions, including the user/permissions setup and the two Docker
 network shapes, are in [docs/deployment.md](docs/deployment.md).
 

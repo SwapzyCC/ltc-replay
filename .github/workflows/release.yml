@@ -1,0 +1,146 @@
+name: Release
+
+# A version tag (v1.2.3) builds the image for amd64 and arm64, pushes it to
+# GHCR as 1.2.3, 1.2, 1 and latest, and publishes a GitHub release whose notes
+# are that version's CHANGELOG section.
+#
+# Nothing is pushed unless the tag matches package.json, the CHANGELOG has a
+# section for it, and the amd64 image passes the same boot check as CI.
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/swapzycc/ltc-replay
+
+jobs:
+  image:
+    name: image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: tag matches package.json and CHANGELOG
+        run: |
+          want="v$(node -p "require('./package.json').version")"
+          test "$want" = "$GITHUB_REF_NAME" \
+            || { echo "tag is $GITHUB_REF_NAME but package.json says $want"; exit 1; }
+          grep -qF "## [${GITHUB_REF_NAME#v}]" CHANGELOG.md \
+            || { echo "CHANGELOG.md has no section for ${GITHUB_REF_NAME#v}"; exit 1; }
+
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+
+      # Build amd64 locally first and boot it, so a broken image never reaches
+      # the registry. Same check as CI: it must refuse to start without a token.
+      - name: build for the boot check
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: ltc-replay:release-check
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: refuses to start without a token
+        run: |
+          set +e
+          out=$(docker run --rm -e LTC_RPC_URL=http://ci:ci@127.0.0.1:9332 ltc-replay:release-check 2>&1)
+          code=$?
+          echo "$out"
+          test $code -ne 0 || { echo "started with no AUTH_TOKEN"; exit 1; }
+          echo "$out" | grep -qi 'AUTH_TOKEN' || { echo "did not name the missing setting"; exit 1; }
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+          labels: |
+            org.opencontainers.image.title=ltc-replay
+            org.opencontainers.image.description=Durable ZMQ tap and replay service for a Litecoin Core node.
+            org.opencontainers.image.licenses=BSD-3-Clause
+
+      - id: push
+        name: build and push
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
+          provenance: mode=max
+          sbom: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - uses: actions/attest-build-provenance@v4
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+
+  release:
+    name: GitHub release
+    needs: image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: notes from CHANGELOG
+        env:
+          DIGEST: ${{ needs.image.outputs.digest }}
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          awk -v h="## [$v]" '
+            index($0, h) == 1 { f = 1; next }
+            f && index($0, "## [") == 1 { exit }
+            f && index($0, "]: http") == 0
+          ' CHANGELOG.md > notes.md
+          {
+            echo
+            echo "### Docker image"
+            echo
+            echo '```bash'
+            echo "docker pull $IMAGE:$v"
+            echo '```'
+            echo
+            echo "Also tagged \`${v%.*}\`, \`${v%%.*}\` and \`latest\`. Digest \`$DIGEST\`."
+          } >> notes.md
+          cat notes.md
+
+      - name: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file notes.md --verify-tag

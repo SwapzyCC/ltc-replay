@@ -10,8 +10,14 @@ schema changes in a way that needs a rebuild.
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-10-03
+
 ### Added
 
+- Docker images on GHCR, `ghcr.io/swapzycc/ltc-replay`, for amd64 and arm64.
+  `.github/workflows/release.yml` builds and publishes them on every
+  version tag, with build provenance and an SBOM, after the same boot
+  check CI runs.
 - `docs/tls-endpoints.md` — running the relay against a node whose ZMQ and RPC
   are behind TLS, and the nginx config for exposing the relay's own API.
 - `deploy/nginx/` — three reference configs: stream-level TLS for the ZMQ
@@ -29,6 +35,8 @@ schema changes in a way that needs a rebuild.
 
 ### Changed
 
+- Node.js 22 or newer is required. better-sqlite3 13 crashes on Node 20.
+- The repository moved to the SwapzyCC organisation, and its links with it.
 - Under Docker, `HTTP_BIND` now sets the **host-side** publish address. The
   process always binds `0.0.0.0` inside the container, because a container
   process on `127.0.0.1` is reachable from nothing. Two Docker-only variables,
@@ -36,7 +44,7 @@ schema changes in a way that needs a rebuild.
 
 ## [1.0.0] - 2026-09-02
 
-First public release.
+First public release. Not tagged; 1.1.0 is the first tagged release.
 
 ### Added
 
@@ -78,5 +86,5 @@ First public release.
 - Deployment for systemd and Docker, a `litecoin.conf` snippet, and eight
   documents under `docs/`.
 
-[unreleased]: https://github.com/SwapzyCC/ltc-replay/compare/v1.0.0...HEAD
-[1.0.0]: https://github.com/SwapzyCC/ltc-replay/releases/tag/v1.0.0
+[unreleased]: https://github.com/SwapzyCC/ltc-replay/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/SwapzyCC/ltc-replay/releases/tag/v1.1.0
